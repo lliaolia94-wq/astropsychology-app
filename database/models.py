@@ -8,11 +8,16 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False)
-    birth_date = Column(String(10), nullable=False)
-    birth_time = Column(String(5), nullable=False)
-    birth_place = Column(String(200), nullable=False)
+    phone = Column(String(20), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    phone_verified = Column(Integer, default=0)  # 0 = не подтвержден, 1 = подтвержден
+    name = Column(String(100), nullable=True)
+    birth_date = Column(String(10), nullable=True)
+    birth_time = Column(String(5), nullable=True)
+    birth_place = Column(String(200), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
 
 
 class NatalChart(Base):
@@ -90,3 +95,15 @@ class ContextEntry(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User")
+
+
+class SMSCode(Base):
+    __tablename__ = "sms_codes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    phone = Column(String(20), nullable=False, index=True)
+    code = Column(String(10), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime, nullable=False)
+    attempts = Column(Integer, default=0)  # Количество попыток ввода
+    used = Column(Integer, default=0)  # 0 = не использован, 1 = использован

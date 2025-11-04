@@ -5,10 +5,11 @@ from typing import Optional, List, Dict, Any
 
 # User Schemas
 class UserCreate(BaseModel):
-    name: str
-    birth_date: str
-    birth_time: str
-    birth_place: str
+    """Обновление профиля пользователя (после регистрации)"""
+    name: Optional[str] = None
+    birth_date: Optional[str] = None
+    birth_time: Optional[str] = None
+    birth_place: Optional[str] = None
 
     class Config:
         json_schema_extra = {
@@ -23,10 +24,12 @@ class UserCreate(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    name: str
-    birth_date: str
-    birth_time: str
-    birth_place: str
+    phone: str
+    phone_verified: bool
+    name: Optional[str] = None
+    birth_date: Optional[str] = None
+    birth_time: Optional[str] = None
+    birth_place: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -170,3 +173,99 @@ class TemplateInfo(BaseModel):
     name: str
     description: str
     prompt_hint: str
+
+
+# Authentication Schemas
+class PhoneRequest(BaseModel):
+    """Запрос на отправку SMS-кода"""
+    phone: str
+    country_code: Optional[str] = "+7"
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "phone": "9161234567",
+                "country_code": "+7"
+            }
+        }
+
+
+class SMSVerifyRequest(BaseModel):
+    """Запрос на подтверждение SMS-кода"""
+    phone: str
+    code: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "phone": "+79161234567",
+                "code": "123456"
+            }
+        }
+
+
+class PasswordSetRequest(BaseModel):
+    """Запрос на установку пароля"""
+    phone: str
+    password: str
+    password_confirm: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "phone": "+79161234567",
+                "password": "SecurePass123",
+                "password_confirm": "SecurePass123"
+            }
+        }
+
+
+class LoginRequest(BaseModel):
+    """Запрос на вход"""
+    phone: str
+    password: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "phone": "+79161234567",
+                "password": "SecurePass123"
+            }
+        }
+
+
+class TokenResponse(BaseModel):
+    """Ответ с токенами"""
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                "token_type": "bearer"
+            }
+        }
+
+
+class RefreshTokenRequest(BaseModel):
+    """Запрос на обновление токена"""
+    refresh_token: str
+
+
+class MessageResponse(BaseModel):
+    """Простой ответ с сообщением"""
+    message: str
+
+
+class UserAuthResponse(BaseModel):
+    """Ответ с информацией о пользователе после аутентификации"""
+    id: int
+    phone: str
+    phone_verified: bool
+    name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
