@@ -5,13 +5,14 @@ from dotenv import load_dotenv
 
 # Импорты из наших модулей
 from database.database import engine, Base
-from routers import astrology_router, contacts_router, ai_router, context_router, general_router, users_router
+from routers import astrology_router, contacts_router, ai_router, context_router, general_router, users_router, auth_router
 
 # Загружаем переменные окружения
 load_dotenv()
 
 tags_metadata = [
     {"name": "General", "description": "Базовые сервисные эндпоинты: корень и здоровье."},
+    {"name": "Authentication", "description": "Аутентификация пользователей: регистрация, вход, восстановление пароля."},
     {"name": "Users", "description": "Управление пользователями и их профилями."},
     {"name": "Astrology", "description": "Расчёты натальных карт, транзитов и календарей."},
     {"name": "Contacts", "description": "Контакты пользователя для синастрий и упоминаний."},
@@ -48,6 +49,7 @@ app.add_middleware(
 
 
 app.include_router(general_router)
+app.include_router(auth_router)
 app.include_router(users_router)
 
     # подключаем роутеры модулей
