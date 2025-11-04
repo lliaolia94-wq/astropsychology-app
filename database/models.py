@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON, DECIMAL, Date, Time
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from database.database import Base
@@ -12,27 +12,82 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     phone_verified = Column(Integer, default=0)  # 0 = не подтвержден, 1 = подтвержден
     name = Column(String(100), nullable=True)
-    birth_date = Column(String(10), nullable=True)
-    birth_time = Column(String(5), nullable=True)
-    birth_place = Column(String(200), nullable=True)
+    birth_date = Column(String(10), nullable=True)  # Для обратной совместимости
+    birth_time = Column(String(5), nullable=True)  # Для обратной совместимости
+    birth_place = Column(String(200), nullable=True)  # Для обратной совместимости
+    
+    # Новые поля для расширенного профиля
+    birth_date_detailed = Column(Date, nullable=True)  # Дата рождения
+    birth_time_detailed = Column(Time, nullable=True)  # Время рождения (локальное время места рождения)
+    birth_time_utc = Column(DateTime, nullable=True)  # Рассчитанное время в UTC
+    birth_location_name = Column(String(200), nullable=True)  # Название города/места
+    birth_country = Column(String(100), nullable=True)  # Страна
+    birth_latitude = Column(DECIMAL(9, 6), nullable=True)  # Географическая широта
+    birth_longitude = Column(DECIMAL(9, 6), nullable=True)  # Географическая долгота
+    timezone_name = Column(String(100), nullable=True)  # Название временной зоны (например, "Europe/Moscow")
+    
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
+    
+    # Связь с натальными картами
+    natal_charts = relationship("NatalChart", back_populates="user_profile", cascade="all, delete-orphan")
 
 
 class NatalChart(Base):
-    __tablename__ = "natal_charts"
+    __tablename__ = "natal_charts_natalchart"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False)
-    sun_sign = Column(String(20))
-    moon_sign = Column(String(20))
-    ascendant_sign = Column(String(20))
-    midheaven_sign = Column(String(20))
-    planets_data = Column(Text)
-    houses_data = Column(Text)
-    angles_data = Column(Text)
-    calculation_date = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    user_profile_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    calculated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    houses_system = Column(String(20), default='placidus', nullable=False)  # Система домов
+    zodiac_type = Column(String(10), default='tropical', nullable=False)  # Тип зодиака
+    
+    # Связи
+    user_profile = relationship("User", back_populates="natal_charts")
+    planet_positions = relationship("PlanetPosition", back_populates="natal_chart", cascade="all, delete-orphan")
+    aspects = relationship("Aspect", back_populates="natal_chart", cascade="all, delete-orphan")
+    house_cuspids = relationship("HouseCuspid", back_populates="natal_chart", cascade="all, delete-orphan")
+
+
+class PlanetPosition(Base):
+    __tablename__ = "natal_charts_planetposition"
+
+    id = Column(Integer, primary_key=True, index=True)
+    natal_chart_id = Column(Integer, ForeignKey("natal_charts_natalchart.id"), nullable=False)
+    planet_name = Column(String(20), nullable=False)  # 'sun', 'moon', 'mercury', etc.
+    longitude = Column(DECIMAL(10, 6), nullable=False)  # Эклиптическая долгота в градусах (0° - 360°)
+    zodiac_sign = Column(String(20), nullable=False)  # 'aries', 'taurus', etc. (увеличено для 'sagittarius')
+    house = Column(Integer, nullable=False)  # Номер дома, в котором находится планета (1-12)
+    is_retrograde = Column(Integer, default=0, nullable=False)  # 0 = директная, 1 = ретроградная
+    
+    natal_chart = relationship("NatalChart", back_populates="planet_positions")
+
+
+class Aspect(Base):
+    __tablename__ = "natal_charts_aspect"
+
+    id = Column(Integer, primary_key=True, index=True)
+    natal_chart_id = Column(Integer, ForeignKey("natal_charts_natalchart.id"), nullable=False)
+    planet_1_name = Column(String(20), nullable=False)  # Первая планета в аспекте
+    planet_2_name = Column(String(20), nullable=False)  # Вторая планета в аспекте
+    aspect_type = Column(String(20), nullable=False)  # 'conjunction', 'sextile', 'square', 'trine', 'opposition'
+    angle = Column(DECIMAL(5, 2), nullable=False)  # Точный угол между планетами
+    orb = Column(DECIMAL(4, 2), nullable=False)  # Орбис аспекта (насколько он неточен)
+    
+    natal_chart = relationship("NatalChart", back_populates="aspects")
+
+
+class HouseCuspid(Base):
+    __tablename__ = "natal_charts_housecuspid"
+
+    id = Column(Integer, primary_key=True, index=True)
+    natal_chart_id = Column(Integer, ForeignKey("natal_charts_natalchart.id"), nullable=False)
+    house_number = Column(Integer, nullable=False)  # Номер дома (1-12)
+    longitude = Column(DECIMAL(10, 6), nullable=False)  # Эклиптическая долгота куспида дома в градусах
+    zodiac_sign = Column(String(20), nullable=False)  # Знак зодиака на куспиде дома (увеличено для 'sagittarius')
+    
+    natal_chart = relationship("NatalChart", back_populates="house_cuspids")
 
 
 class Contact(Base):

@@ -1,23 +1,51 @@
 from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+from pydantic import validator, Field
 
 
 # User Schemas
 class UserCreate(BaseModel):
     """Обновление профиля пользователя (после регистрации)"""
     name: Optional[str] = None
-    birth_date: Optional[str] = None
-    birth_time: Optional[str] = None
-    birth_place: Optional[str] = None
+    birth_date: Optional[str] = Field(None, description="Формат: YYYY-MM-DD")
+    birth_time: Optional[str] = Field(None, description="Формат: HH:MM")
+    birth_place: Optional[str] = Field(None, description="Старое поле для обратной совместимости")
+    # Новые поля для расширенного профиля
+    birth_location_name: Optional[str] = Field(None, description="Название города/места")
+    birth_country: Optional[str] = Field(None, description="Страна")
+    birth_latitude: Optional[float] = Field(None, ge=-90, le=90, description="Широта от -90 до +90")
+    birth_longitude: Optional[float] = Field(None, ge=-180, le=180, description="Долгота от -180 до +180")
+    timezone_name: Optional[str] = Field(None, description="Временная зона (например, Europe/Moscow)")
+
+    @validator('birth_latitude')
+    def validate_latitude(cls, v):
+        """Валидация широты"""
+        if v is not None:
+            if not (-90 <= v <= 90):
+                raise ValueError('Широта должна быть в диапазоне от -90 до +90 градусов')
+        return v
+
+    @validator('birth_longitude')
+    def validate_longitude(cls, v):
+        """Валидация долготы"""
+        if v is not None:
+            if not (-180 <= v <= 180):
+                raise ValueError('Долгота должна быть в диапазоне от -180 до +180 градусов')
+        return v
 
     class Config:
         json_schema_extra = {
             "example": {
-                "name": "Тестовый Пользователь",
-                "birth_date": "1990-05-15",
-                "birth_time": "14:30",
-                "birth_place": "Москва, Россия"
+                "name": "Сергеева Ольга",
+                "birth_date": "1994-10-23",
+                "birth_time": "19:30",
+                "birth_place": "Семей, Казахстан",
+                "birth_location_name": "Семей",
+                "birth_country": "Казахстан",
+                "birth_latitude": 50.4111,
+                "birth_longitude": 80.2275,
+                "timezone_name": "Asia/Almaty"
             }
         }
 
@@ -30,6 +58,12 @@ class UserResponse(BaseModel):
     birth_date: Optional[str] = None
     birth_time: Optional[str] = None
     birth_place: Optional[str] = None
+    # Расширенные поля профиля
+    birth_location_name: Optional[str] = None
+    birth_country: Optional[str] = None
+    birth_latitude: Optional[float] = None
+    birth_longitude: Optional[float] = None
+    timezone_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -269,3 +303,193 @@ class UserAuthResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Natal Chart Schemas
+class UserProfileUpdate(BaseModel):
+    """Обновление профиля пользователя с данными для расчета натальной карты"""
+    birth_date: Optional[str] = None  # Формат: "YYYY-MM-DD"
+    birth_time: Optional[str] = None  # Формат: "HH:MM"
+    birth_location_name: Optional[str] = None
+    birth_country: Optional[str] = None
+    birth_latitude: Optional[float] = Field(None, ge=-90, le=90, description="Широта от -90 до +90")
+    birth_longitude: Optional[float] = Field(None, ge=-180, le=180, description="Долгота от -180 до +180")
+    timezone_name: Optional[str] = None
+
+    @validator('birth_latitude')
+    def validate_latitude(cls, v):
+        """Валидация широты"""
+        if v is not None:
+            if not (-90 <= v <= 90):
+                raise ValueError('Широта должна быть в диапазоне от -90 до +90 градусов')
+        return v
+
+    @validator('birth_longitude')
+    def validate_longitude(cls, v):
+        """Валидация долготы"""
+        if v is not None:
+            if not (-180 <= v <= 180):
+                raise ValueError('Долгота должна быть в диапазоне от -180 до +180 градусов')
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "birth_date": "1990-05-15",
+                "birth_time": "14:30",
+                "birth_location_name": "Москва",
+                "birth_country": "Россия",
+                "birth_latitude": 55.7558,
+                "birth_longitude": 37.6173,
+                "timezone_name": "Europe/Moscow"
+            }
+        }
+
+
+class ManualCoordinatesRequest(BaseModel):
+    """Запрос на ручной ввод координат"""
+    birth_location_name: Optional[str] = None
+    birth_country: Optional[str] = None
+    birth_latitude: float = Field(..., ge=-90, le=90, description="Широта от -90 до +90")
+    birth_longitude: float = Field(..., ge=-180, le=180, description="Долгота от -180 до +180")
+    timezone_name: Optional[str] = None
+
+    @validator('birth_latitude')
+    def validate_latitude(cls, v):
+        """Валидация широты"""
+        if not (-90 <= v <= 90):
+            raise ValueError('Широта должна быть в диапазоне от -90 до +90 градусов')
+        return v
+
+    @validator('birth_longitude')
+    def validate_longitude(cls, v):
+        """Валидация долготы"""
+        if not (-180 <= v <= 180):
+            raise ValueError('Долгота должна быть в диапазоне от -180 до +180 градусов')
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "birth_location_name": "Неизвестный город",
+                "birth_country": "Россия",
+                "birth_latitude": 55.7558,
+                "birth_longitude": 37.6173,
+                "timezone_name": "Europe/Moscow"
+            }
+        }
+
+
+class GeocodingSearchRequest(BaseModel):
+    """Запрос на поиск города"""
+    query: str = Field(..., min_length=1, description="Поисковый запрос")
+    country: Optional[str] = None
+    limit: Optional[int] = Field(10, ge=1, le=50, description="Максимальное количество результатов")
+
+
+class GeocodingSearchResponse(BaseModel):
+    """Ответ на поиск города"""
+    cities: List[Dict[str, Any]]
+    total: int
+
+
+class GeocodingErrorResponse(BaseModel):
+    """Ответ при ошибке геокодирования"""
+    error: str
+    error_code: str
+    requires_manual_input: bool
+    message: str
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "error": "Город не найден в базе данных",
+                "error_code": "CITY_NOT_FOUND",
+                "requires_manual_input": True,
+                "message": "Не удалось найти координаты для указанного города. Пожалуйста, введите координаты вручную."
+            }
+        }
+
+
+class PlanetPositionResponse(BaseModel):
+    """Позиция планеты в натальной карте"""
+    planet_name: str
+    longitude: float
+    zodiac_sign: str
+    house: int
+    is_retrograde: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class AspectResponse(BaseModel):
+    """Аспект между планетами"""
+    planet_1_name: str
+    planet_2_name: str
+    aspect_type: str
+    angle: float
+    orb: float
+
+    class Config:
+        from_attributes = True
+
+
+class HouseCuspidResponse(BaseModel):
+    """Куспид дома"""
+    house_number: int
+    longitude: float
+    zodiac_sign: str
+
+    class Config:
+        from_attributes = True
+
+
+class AngleResponse(BaseModel):
+    """Угол (ASC или MC)"""
+    longitude: float
+    zodiac_sign: str
+
+
+class NatalChartResponse(BaseModel):
+    """Полная натальная карта"""
+    chart_id: int
+    calculated_at: str
+    houses_system: str
+    zodiac_type: str
+    planets: Dict[str, Any]  # Используем Any для гибкости
+    aspects: List[AspectResponse]
+    houses: Dict[str, Any]  # Используем Any для гибкости
+    angles: Dict[str, AngleResponse]
+
+
+class NatalChartCalculateRequest(BaseModel):
+    """Запрос на расчет натальной карты"""
+    houses_system: Optional[str] = "placidus"  # Система домов
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "houses_system": "placidus"
+            }
+        }
+
+
+class NatalChartCalculateResponse(BaseModel):
+    """Ответ на запрос расчета натальной карты"""
+    chart_id: int
+    status: str
+    message: str
+    recalculated: bool
+
+
+class NatalChartRecalculateRequest(BaseModel):
+    """Запрос на пересчет натальной карты"""
+    houses_system: Optional[str] = "placidus"
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "houses_system": "placidus"
+            }
+        }

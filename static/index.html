@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#6366f1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Астопсихология">
+    <meta name="description" content="Рассчитайте свою натальную карту с помощью искусственного интеллекта. Полностью бесплатно, без регистрации.">
+    
+    <title>Астопсихология — Натальная карта с AI</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/static/manifest.json">
+    
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/static/icon-512.png">
+    
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1 class="logo">✨ Астопсихология</h1>
+            <p class="tagline">Натальная карта с искусственным интеллектом</p>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Step 1: Input Form -->
+            <section id="step-input" class="step active">
+                <div class="card">
+                    <h2>Создайте свою натальную карту</h2>
+                    <p class="subtitle">Полностью бесплатно, без регистрации</p>
+                    
+                    <form id="chart-form" class="form">
+                        <div class="form-group">
+                            <label for="name">Имя:</label>
+                            <input type="text" id="name" placeholder="Ваше имя (необязательно)" value="Гость">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="birth-date">Дата рождения:</label>
+                            <input type="text" id="birth-date" placeholder="1990-10-17 или 17.10.1990" required>
+                            <small>Формат: ГГГГ-ММ-ДД или ДД.ММ.ГГГГ</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="birth-time">Время рождения:</label>
+                            <input type="text" id="birth-time" placeholder="14:30" required>
+                            <small>Если не знаете, оставьте 12:00</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="birth-place">Город рождения:</label>
+                            <input type="text" id="birth-place" placeholder="Москва" required>
+                            <small>Начните вводить название города</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="birth-country">Страна (необязательно):</label>
+                            <input type="text" id="birth-country" placeholder="Россия">
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" id="calculate-btn">
+                            <span class="btn-text">✨ ПОЛУЧИТЬ КАРТУ БЕСПЛАТНО</span>
+                        </button>
+                    </form>
+
+                    <div class="features">
+                        <div class="feature">
+                            <span class="check">✓</span>
+                            <span>Полностью бесплатно</span>
+                        </div>
+                        <div class="feature">
+                            <span class="check">✓</span>
+                            <span>Без регистрации</span>
+                        </div>
+                        <div class="feature">
+                            <span class="check">✓</span>
+                            <span>Конфиденциально</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 2: Loading -->
+            <section id="step-loading" class="step">
+                <div class="card">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Рассчитываем вашу натальную карту...</p>
+                        <small>Это займет несколько секунд</small>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 3: Chart Results -->
+            <section id="step-results" class="step">
+                <div class="card">
+                    <h2>Ваша натальная карта</h2>
+                    
+                    <!-- Main Signs -->
+                    <div class="main-signs" id="main-signs">
+                        <div class="sign-card">
+                            <div class="sign-icon">☀️</div>
+                            <div class="sign-label">Солнце</div>
+                            <div class="sign-value" id="sun-sign">-</div>
+                        </div>
+                        <div class="sign-card">
+                            <div class="sign-icon">🌙</div>
+                            <div class="sign-label">Луна</div>
+                            <div class="sign-value" id="moon-sign">-</div>
+                        </div>
+                        <div class="sign-card">
+                            <div class="sign-icon">⬆️</div>
+                            <div class="sign-label">Асцендент</div>
+                            <div class="sign-value" id="asc-sign">-</div>
+                        </div>
+                    </div>
+
+                    <!-- Chart Data -->
+                    <div class="chart-details" id="chart-details">
+                        <h3>Планеты в знаках</h3>
+                        <div class="planets-grid" id="planets-grid"></div>
+                    </div>
+
+                    <!-- AI Interpretation -->
+                    <div class="ai-section">
+                        <h3>AI-интерпретация</h3>
+                        <div id="interpretation-loading" class="loading-small" style="display: none;">
+                            <div class="spinner-small"></div>
+                            <span>AI анализирует вашу карту...</span>
+                        </div>
+                        <div id="interpretation-content" class="interpretation-content"></div>
+                        <button class="btn btn-secondary" id="get-interpretation-btn" style="display: none;">
+                            Получить AI-интерпретацию
+                        </button>
+                    </div>
+
+                    <!-- New Calculation -->
+                    <div class="actions">
+                        <button class="btn btn-outline" id="new-chart-btn">
+                            Рассчитать новую карту
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Error Message -->
+            <section id="error-message" class="error-message" style="display: none;">
+                <div class="card error-card">
+                    <h3>❌ Ошибка</h3>
+                    <p id="error-text"></p>
+                    <button class="btn btn-primary" onclick="location.reload()">Попробовать снова</button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Используем профессиональные алгоритмы и искусственный интеллект</p>
+            <p>© 2025 Астопсихология — Натальные карты с настоящим искусственным интеллектом</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
+
