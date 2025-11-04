@@ -1,0 +1,118 @@
+### Создание пользователя
+POST http://localhost:8000/users
+Content-Type: application/json
+
+{
+  "name": "Тестовый Пользователь",
+  "birth_date": "1990-05-15",
+  "birth_time": "14:30",
+  "birth_place": "Москва, Россия"
+}
+
+### Получение всех пользователей
+GET http://localhost:8000/users
+
+### Расчет полноценной натальной карты
+POST http://localhost:8000/api/calculate-full-chart/1
+
+### Получение профессионального календаря
+GET http://localhost:8000/api/professional-calendar/1/2024/12
+
+### Получение детальных транзитов на день
+GET http://localhost:8000/api/daily-transits/1/2024-12-15
+
+### === КОНТАКТЫ ===
+
+### Создание контакта
+POST http://localhost:8000/contacts?user_id=1
+Content-Type: application/json
+
+{
+  "name": "Мария Иванова",
+  "relationship_type": "друг",
+  "custom_title": "Лучшая подруга",
+  "birth_date": "1992-08-20",
+  "birth_time": "09:15",
+  "birth_place": "Санкт-Петербург, Россия"
+}
+
+### Создание контакта (партнер)
+POST http://localhost:8000/contacts?user_id=1
+Content-Type: application/json
+
+{
+  "name": "Алексей Петров",
+  "relationship_type": "партнер",
+  "custom_title": "Муж",
+  "birth_date": "1988-11-10",
+  "birth_time": "18:45",
+  "birth_place": "Москва, Россия"
+}
+
+### Получение контактов пользователя
+GET http://localhost:8000/users/1/contacts
+
+### === ИИ-ЧАТ ===
+
+### Получение доступных шаблонов
+GET http://localhost:8000/ai/templates
+
+### Чат с ИИ (анализ транзитов)
+POST http://localhost:8000/ai/chat?user_id=1
+Content-Type: application/json
+
+{
+  "message": "Я чувствую сильное напряжение на работе. Сегодня начальник критиковал мой проект, и я не знаю как реагировать. Какие транзиты сейчас влияют на мою карьеру?",
+  "template_type": "transit_analysis",
+  "mentioned_contacts": ["начальник"]
+}
+
+### Чат с ИИ (отношения)
+POST http://localhost:8000/ai/chat?user_id=1
+Content-Type: application/json
+
+{
+  "message": "У нас с мужем участились конфликты из-за финансов. Не могу понять, это временные трудности или серьезные проблемы в отношениях? Помоги разобраться с астрологической точки зрения.",
+  "template_type": "relationship_synastry",
+  "mentioned_contacts": ["муж", "Алексей"]
+}
+
+### Чат с ИИ (экстренная поддержка)
+POST http://localhost:8000/ai/chat?user_id=1
+Content-Type: application/json
+
+{
+  "message": "Только что получила уведомление о сокращении на работе. В панике, не знаю что делать. Чувствую себя потерянной и напуганной.",
+  "template_type": "emergency_support"
+}
+
+### Чат с ИИ (ежедневный прогноз)
+POST http://localhost:8000/ai/chat?user_id=1
+Content-Type: application/json
+
+{
+  "message": "Какая энергетика у меня сегодня? Что ждать от этого дня? Есть важная встреча в 15:00.",
+  "template_type": "daily_forecast"
+}
+
+### Получение сессий чата пользователя
+GET http://localhost:8000/users/1/chat-sessions
+
+### === КОНТЕКСТ ===
+
+### Создание контекстной записи вручную
+POST http://localhost:8000/context?user_id=1
+Content-Type: application/json
+
+{
+  "event": "Успешно провела презентацию проекта",
+  "emotion": "радость",
+  "insight": "Обнаружила, что лучше всего работаю в утренние часы",
+  "astro_context": "Меркурий в трине с Юпитером",
+  "successful_strategy": "Глубокая подготовка + медитация перед выступлением",
+  "tags": ["работа", "успех", "коммуникация"],
+  "is_important": true
+}
+
+### Получение контекстных записей пользователя
+GET http://localhost:8000/users/1/context
