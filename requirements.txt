@@ -19,3 +19,9 @@ geopy
 pytest
 pytest-asyncio
 alembic
+# Context Management Dependencies
+qdrant-client>=1.7.1
+redis==5.0.1
+rq==1.15.1
+sentence-transformers>=5.1.2
+asyncpg==0.29.0
