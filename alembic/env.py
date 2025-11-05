@@ -10,14 +10,14 @@ import sys
 from dotenv import load_dotenv
 
 # Добавляем корневую директорию в путь
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 # Загружаем переменные окружения
 load_dotenv()
 
 # Импортируем Base и все модели
-from database.database import Base, engine
-from database.models import *  # Импортируем все модели
+from app.core.database import Base, engine
+from app.models.database.models import *  # Импортируем все модели
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
