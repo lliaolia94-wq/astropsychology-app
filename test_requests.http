@@ -116,3 +116,30 @@ Content-Type: application/json
 
 ### Получение контекстных записей пользователя
 GET http://localhost:8000/users/1/context
+
+### === ГЕОКОДИРОВАНИЕ ===
+
+### Поиск городов (автодополнение)
+POST http://localhost:8000/api/geocoding/search
+Content-Type: application/json
+
+{
+  "query": "Моск",
+  "limit": 10
+}
+
+### Поиск городов с фильтром по стране
+POST http://localhost:8000/api/geocoding/search
+Content-Type: application/json
+
+{
+  "query": "Нов",
+  "country": "Россия",
+  "limit": 5
+}
+
+### Геокодирование города по названию
+GET http://localhost:8000/api/geocoding/geocode/Москва?country=Россия
+
+### Валидация координат
+GET http://localhost:8000/api/geocoding/validate-coordinates?latitude=55.7558&longitude=37.6173

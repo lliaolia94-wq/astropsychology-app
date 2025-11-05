@@ -8,7 +8,11 @@ from typing import Optional, Dict
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
 from database.models import User
+
+# Загружаем переменные окружения
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +74,9 @@ class AuthService:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
             
             # Проверяем тип токена
-            if payload.get("type") != token_type:
-                logger.warning(f"Неверный тип токена. Ожидается {token_type}")
+            token_type_in_payload = payload.get("type")
+            if token_type_in_payload != token_type:
+                logger.warning(f"Неверный тип токена. Ожидается {token_type}, получен {token_type_in_payload}")
                 return None
             
             return payload
@@ -106,14 +111,49 @@ class AuthService:
         """
         Получение текущего пользователя по JWT токену
         """
-        payload = AuthService.verify_token(token, token_type="access")
-        if payload is None:
+        logger.info(f"get_current_user вызван с токеном: {token[:50]}...")
+        logger.info(f"SECRET_KEY для проверки: {SECRET_KEY[:20]}...")
+        
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            token_type_in_payload = payload.get("type")
+            
+            logger.info(f"✅ Токен декодирован: type={token_type_in_payload}, sub={payload.get('sub')}, exp={payload.get('exp')}")
+            
+            # Проверяем тип токена с более понятным сообщением
+            if token_type_in_payload != "access":
+                if token_type_in_payload == "refresh":
+                    logger.warning("❌ Попытка использовать refresh токен вместо access токена")
+                else:
+                    logger.warning(f"❌ Неверный тип токена: {token_type_in_payload}")
+                return None
+        except JWTError as e:
+            logger.error(f"❌ Ошибка проверки токена: {str(e)}, тип: {type(e).__name__}")
             return None
         
-        user_id: int = payload.get("sub")
+        user_id = payload.get("sub")
         if user_id is None:
+            logger.warning("❌ В токене отсутствует поле 'sub' (user_id)")
             return None
         
-        user = db.query(User).filter(User.id == user_id).first()
-        return user
+        # Конвертируем user_id в int, если это строка
+        try:
+            user_id = int(user_id)
+        except (ValueError, TypeError) as e:
+            logger.warning(f"❌ Неверный формат user_id в токене: {user_id} (тип: {type(user_id)}), ошибка: {e}")
+            return None
+        
+        logger.info(f"🔍 Ищем пользователя с ID {user_id} (тип: {type(user_id)})")
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user is None:
+                # Проверяем, есть ли вообще пользователи в базе
+                total_users = db.query(User).count()
+                logger.warning(f"❌ Пользователь с ID {user_id} не найден в базе данных. Всего пользователей в базе: {total_users}")
+            else:
+                logger.info(f"✅ Пользователь найден: ID={user.id}, phone={user.phone}")
+            return user
+        except Exception as e:
+            logger.error(f"❌ Ошибка при запросе к базе данных: {str(e)}")
+            return None
 

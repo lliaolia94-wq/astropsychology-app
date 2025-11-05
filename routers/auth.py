@@ -3,6 +3,7 @@
 """
 import re
 import logging
+import os
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -52,11 +53,43 @@ def get_current_user(
     Зависимость для получения текущего пользователя из JWT токена
     """
     token = credentials.credentials
+    
     user = AuthService.get_current_user(db, token)
     if user is None:
+        # Проверяем, может быть это refresh токен, чтобы дать более понятное сообщение
+        try:
+            from jose import jwt
+            from services.auth_service import SECRET_KEY, ALGORITHM
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            token_type = payload.get("type")
+            user_id_from_token = payload.get("sub")
+            
+            if token_type == "refresh":
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Использован refresh токен. Для этого эндпоинта требуется access токен. Используйте токен из поля 'access_token' ответа /auth/login",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            
+            # Если токен валиден, но пользователь не найден, проверяем в базе
+            if user_id_from_token:
+                user_id_from_token = int(user_id_from_token)
+                user_check = db.query(User).filter(User.id == user_id_from_token).first()
+                if not user_check:
+                    logger.error(f"Пользователь с ID {user_id_from_token} из токена не найден в базе данных")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail=f"Пользователь с ID {user_id_from_token} не найден в базе данных. Возможно, учетная запись была удалена.",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Ошибка при проверке токена: {str(e)}")
+        
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный или истекший токен",
+            detail="Неверный или истекший токен. Убедитесь, что используете access токен, а не refresh токен",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
@@ -189,24 +222,34 @@ async def register_user(
         )
     
     # Проверка подтверждения SMS-кода (код должен быть использован)
-    from database.models import SMSCode
-    sms_code = db.query(SMSCode).filter(
-        SMSCode.phone == normalized_phone,
-        SMSCode.used == 1
-    ).order_by(SMSCode.created_at.desc()).first()
+    # ВРЕМЕННАЯ ЗАГЛУШКА: Можно отключить проверку SMS через переменную окружения SKIP_SMS_VERIFICATION=true
+    skip_sms_check = os.getenv("SKIP_SMS_VERIFICATION", "false").lower() == "true"
     
-    if not sms_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Сначала подтвердите SMS-код"
-        )
+    if not skip_sms_check:
+        from database.models import SMSCode
+        sms_code = db.query(SMSCode).filter(
+            SMSCode.phone == normalized_phone,
+            SMSCode.used == 1
+        ).order_by(SMSCode.created_at.desc()).first()
+        
+        if not sms_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Сначала подтвердите SMS-код"
+            )
+    else:
+        logger.warning(f"⚠️ ПРОВЕРКА SMS ОТКЛЮЧЕНА (тестовый режим). Регистрация пользователя {normalized_phone} без проверки SMS-кода")
     
     # Создание пользователя
     password_hash = AuthService.get_password_hash(request.password)
     user = User(
         phone=normalized_phone,
         password_hash=password_hash,
-        phone_verified=1
+        phone_verified=1,
+        name="",  # Устанавливаем пустую строку, так как name может быть NOT NULL в БД
+        birth_date="",  # Устанавливаем пустую строку для полей, которые могут быть NOT NULL
+        birth_time="",
+        birth_place=""
     )
     db.add(user)
     db.commit()
@@ -214,10 +257,10 @@ async def register_user(
     
     # Генерация токенов
     access_token = AuthService.create_access_token(
-        data={"sub": user.id},
+        data={"sub": str(user.id)},  # JWT требует, чтобы sub был строкой
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    refresh_token = AuthService.create_refresh_token(data={"sub": user.id})
+    refresh_token = AuthService.create_refresh_token(data={"sub": str(user.id)})  # JWT требует, чтобы sub был строкой
     
     logger.info(f"Пользователь {normalized_phone} успешно зарегистрирован")
     return TokenResponse(
@@ -267,13 +310,14 @@ async def login(
     RateLimiter.reset_limits(normalized_phone)
     
     # Генерация токенов
+    logger.info(f"Создаю токены для пользователя: ID={user.id}, phone={user.phone}, type(user.id)={type(user.id)}")
     access_token = AuthService.create_access_token(
-        data={"sub": user.id},
+        data={"sub": str(user.id)},  # JWT требует, чтобы sub был строкой
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    refresh_token = AuthService.create_refresh_token(data={"sub": user.id})
+    refresh_token = AuthService.create_refresh_token(data={"sub": str(user.id)})  # JWT требует, чтобы sub был строкой
     
-    logger.info(f"Пользователь {normalized_phone} успешно вошел в систему")
+    logger.info(f"Пользователь {normalized_phone} успешно вошел в систему. Access token создан: {access_token[:50]}...")
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -311,10 +355,10 @@ async def refresh_token(
     
     # Генерация новых токенов
     access_token = AuthService.create_access_token(
-        data={"sub": user.id},
+        data={"sub": str(user.id)},  # JWT требует, чтобы sub был строкой
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    refresh_token = AuthService.create_refresh_token(data={"sub": user.id})
+    refresh_token = AuthService.create_refresh_token(data={"sub": str(user.id)})  # JWT требует, чтобы sub был строкой
     
     logger.info(f"Токены обновлены для пользователя {user.phone}")
     return TokenResponse(
@@ -404,17 +448,23 @@ async def reset_password_confirm(
         )
     
     # Проверка подтверждения SMS-кода
-    from database.models import SMSCode
-    sms_code = db.query(SMSCode).filter(
-        SMSCode.phone == normalized_phone,
-        SMSCode.used == 1
-    ).order_by(SMSCode.created_at.desc()).first()
+    # ВРЕМЕННАЯ ЗАГЛУШКА: Можно отключить проверку SMS через переменную окружения SKIP_SMS_VERIFICATION=true
+    skip_sms_check = os.getenv("SKIP_SMS_VERIFICATION", "false").lower() == "true"
     
-    if not sms_code:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Сначала подтвердите SMS-код"
-        )
+    if not skip_sms_check:
+        from database.models import SMSCode
+        sms_code = db.query(SMSCode).filter(
+            SMSCode.phone == normalized_phone,
+            SMSCode.used == 1
+        ).order_by(SMSCode.created_at.desc()).first()
+        
+        if not sms_code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Сначала подтвердите SMS-код"
+            )
+    else:
+        logger.warning(f"⚠️ ПРОВЕРКА SMS ОТКЛЮЧЕНА (тестовый режим). Сброс пароля для {normalized_phone} без проверки SMS-кода")
     
     # Валидация пароля
     if not validate_password(request.password):
