@@ -124,6 +124,16 @@ async def get_daily_transits(user_id: int, date: str, db: Session = Depends(get_
     Получение детальных транзитов на конкретную дату.
     
     Требует наличия рассчитанной натальной карты пользователя.
+    
+    Использует текущее местоположение пользователя для расчета транзитов.
+    Если текущее местоположение не указано, используется место рождения.
+    
+    Новые поля текущего местоположения:
+    - current_location_name: Название текущего города
+    - current_country: Текущая страна
+    - current_latitude: Текущая широта
+    - current_longitude: Текущая долгота
+    - current_timezone_name: Текущая временная зона
     """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -133,6 +143,44 @@ async def get_daily_transits(user_id: int, date: str, db: Session = Depends(get_
         datetime.strptime(date, "%Y-%m-%d")
     except ValueError:
         raise HTTPException(status_code=400, detail="Неверный формат даты. Используйте: ГГГГ-ММ-ДД")
+
+    # Определяем координаты для расчета транзитов
+    # Приоритет: текущее местоположение > место рождения
+    latitude = None
+    longitude = None
+    location_name = None
+    country = None
+    timezone_name = None
+    location_type = None  # Для информации о том, какое местоположение используется
+    
+    # Проверяем наличие текущего местоположения (новые поля)
+    if (user.current_latitude is not None and 
+        user.current_longitude is not None and
+        float(user.current_latitude) != 0 and 
+        float(user.current_longitude) != 0):
+        # Используем текущее местоположение
+        latitude = float(user.current_latitude)
+        longitude = float(user.current_longitude)
+        location_name = user.current_location_name or "Не указано"
+        country = user.current_country or "Не указано"
+        timezone_name = user.current_timezone_name
+        location_type = "current"
+    elif (user.birth_latitude is not None and 
+          user.birth_longitude is not None and
+          float(user.birth_latitude) != 0 and 
+          float(user.birth_longitude) != 0):
+        # Используем место рождения как fallback
+        latitude = float(user.birth_latitude)
+        longitude = float(user.birth_longitude)
+        location_name = user.birth_location_name or "Не указано"
+        country = user.birth_country or "Не указано"
+        timezone_name = user.timezone_name
+        location_type = "birth"
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Не указано текущее местоположение или место рождения. Обновите профиль пользователя."
+        )
 
     # Получаем натальную карту из базы данных
     chart_data = natal_chart_service.get_chart_for_user(user, db)
@@ -151,7 +199,13 @@ async def get_daily_transits(user_id: int, date: str, db: Session = Depends(get_
         'aspects': chart_data.get('aspects', [])
     }
 
-    transits = astro_service.calculate_transits(natal_chart, date)
+    transits = astro_service.calculate_transits(
+        natal_chart, 
+        date,
+        latitude=latitude,
+        longitude=longitude,
+        timezone_name=timezone_name
+    )
 
     if not transits['success']:
         raise HTTPException(status_code=500, detail=f"Ошибка расчета транзитов: {transits['error']}")
@@ -159,6 +213,14 @@ async def get_daily_transits(user_id: int, date: str, db: Session = Depends(get_
     return {
         "user_id": user_id,
         "date": date,
+        "location": {
+            "type": location_type,  # "current" или "birth"
+            "name": location_name,
+            "country": country,
+            "latitude": latitude,
+            "longitude": longitude,
+            "timezone": timezone_name
+        },
         "transits": transits
     }
 

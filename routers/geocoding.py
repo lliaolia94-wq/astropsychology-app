@@ -82,7 +82,8 @@ async def set_manual_coordinates(
         birth_country=request.birth_country or current_user.birth_country,
         birth_latitude=request.birth_latitude,
         birth_longitude=request.birth_longitude,
-        timezone_name=request.timezone_name
+        timezone_name=request.timezone_name,
+        birth_time_utc_offset=request.birth_time_utc_offset
     )
     
     if not result['success']:

@@ -192,9 +192,13 @@ class NatalChartService:
         # Собираем данные из связанных таблиц
         planets = {}
         for planet_pos in natal_chart.planet_positions:
+            longitude = float(planet_pos.longitude)
+            # Вычисляем градусы внутри знака (0-29.99)
+            degree_in_sign = round(longitude % 30, 2)
             planets[planet_pos.planet_name] = {
-                'longitude': float(planet_pos.longitude),
+                'longitude': longitude,
                 'zodiac_sign': planet_pos.zodiac_sign,
+                'degree_in_sign': degree_in_sign,
                 'house': planet_pos.house,
                 'is_retrograde': bool(planet_pos.is_retrograde)
             }
@@ -211,9 +215,13 @@ class NatalChartService:
         
         houses = {}
         for house_cuspid in natal_chart.house_cuspids:
+            longitude = float(house_cuspid.longitude)
+            # Вычисляем градусы внутри знака (0-29.99)
+            degree_in_sign = round(longitude % 30, 2)
             houses[house_cuspid.house_number] = {
-                'longitude': float(house_cuspid.longitude),
-                'zodiac_sign': house_cuspid.zodiac_sign
+                'longitude': longitude,
+                'zodiac_sign': house_cuspid.zodiac_sign,
+                'degree_in_sign': degree_in_sign
             }
         
         # Получаем ASC и MC из домов
@@ -231,11 +239,13 @@ class NatalChartService:
             'angles': {
                 'ascendant': {
                     'longitude': ascendant.get('longitude', 0),
-                    'zodiac_sign': ascendant.get('zodiac_sign', '')
+                    'zodiac_sign': ascendant.get('zodiac_sign', ''),
+                    'degree_in_sign': ascendant.get('degree_in_sign', 0)
                 },
                 'midheaven': {
                     'longitude': midheaven.get('longitude', 0),
-                    'zodiac_sign': midheaven.get('zodiac_sign', '')
+                    'zodiac_sign': midheaven.get('zodiac_sign', ''),
+                    'degree_in_sign': midheaven.get('degree_in_sign', 0)
                 }
             }
         }
@@ -256,7 +266,8 @@ class NatalChartService:
         birth_country: Optional[str] = None,
         birth_latitude: Optional[float] = None,
         birth_longitude: Optional[float] = None,
-        timezone_name: Optional[str] = None
+        timezone_name: Optional[str] = None,
+        birth_time_utc_offset: Optional[float] = None
     ) -> Dict:
         """
         Обновляет профиль пользователя и автоматически пересчитывает карту.
@@ -318,10 +329,10 @@ class NatalChartService:
                     user.birth_longitude = birth_longitude
             
             # Определяем временную зону
-            if timezone_name:
+            if timezone_name is not None:
                 user.timezone_name = timezone_name
-            elif user.birth_latitude and user.birth_longitude:
-                # Определяем временную зону по координатам
+            elif user.birth_latitude and user.birth_longitude and not user.timezone_name:
+                # Определяем временную зону по координатам (только если не указана)
                 tz = self.geocoding_service.get_timezone_by_coordinates(
                     float(user.birth_latitude),
                     float(user.birth_longitude)
@@ -329,12 +340,19 @@ class NatalChartService:
                 if tz:
                     user.timezone_name = tz
             
+            # Сохраняем UTC offset, если указан
+            if birth_time_utc_offset is not None:
+                user.birth_time_utc_offset = birth_time_utc_offset
+            
             # Рассчитываем UTC время
-            if user.birth_date_detailed and user.birth_time_detailed and user.timezone_name:
+            if user.birth_date_detailed and user.birth_time_detailed:
+                # Используем явный UTC offset, если указан, иначе timezone_name
+                utc_offset = float(user.birth_time_utc_offset) if user.birth_time_utc_offset is not None else None
                 user.birth_time_utc = self.geocoding_service.calculate_utc_time(
                     user.birth_date_detailed,
                     user.birth_time_detailed,
-                    user.timezone_name
+                    timezone_name=user.timezone_name,
+                    utc_offset_hours=utc_offset
                 )
             
             db.commit()

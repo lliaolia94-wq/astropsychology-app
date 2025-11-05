@@ -94,10 +94,14 @@ async def get_natal_chart(
     # Используем простые словари для planets и houses, так как они уже в нужном формате
     planets_response = {}
     for planet_name, planet_data in chart_data['planets'].items():
+        longitude = planet_data['longitude']
+        # Вычисляем градусы внутри знака, если их нет
+        degree_in_sign = planet_data.get('degree_in_sign', round(longitude % 30, 2))
         planets_response[planet_name] = {
             'planet_name': planet_name,
-            'longitude': planet_data['longitude'],
+            'longitude': longitude,
             'zodiac_sign': planet_data['zodiac_sign'],
+            'degree_in_sign': degree_in_sign,
             'house': planet_data['house'],
             'is_retrograde': planet_data.get('is_retrograde', False)
         }
@@ -108,14 +112,22 @@ async def get_natal_chart(
     
     houses_response = {}
     for house_num, house_data in chart_data['houses'].items():
+        longitude = house_data['longitude']
+        # Вычисляем градусы внутри знака, если их нет
+        degree_in_sign = house_data.get('degree_in_sign', round(longitude % 30, 2))
         houses_response[str(house_num)] = {
             'house_number': house_num,
-            'longitude': house_data['longitude'],
-            'zodiac_sign': house_data['zodiac_sign']
+            'longitude': longitude,
+            'zodiac_sign': house_data['zodiac_sign'],
+            'degree_in_sign': degree_in_sign
         }
     
     angles_response = {}
     for angle_name, angle_data in chart_data['angles'].items():
+        # Убеждаемся, что degree_in_sign присутствует
+        if 'degree_in_sign' not in angle_data:
+            longitude = angle_data.get('longitude', 0)
+            angle_data['degree_in_sign'] = round(longitude % 30, 2)
         angles_response[angle_name] = AngleResponse(**angle_data)
     
     return NatalChartResponse(

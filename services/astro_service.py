@@ -526,15 +526,156 @@ class ProfessionalAstroService:
                 return {
                     'name': aspect_name,
                     'name_ru': aspect_name_ru,
+                    'type': aspect_name,  # Добавляем тип для использования в _calculate_transit_times
                     'angle': aspect_angle,
                     'orb': float(round(abs(diff - aspect_angle), 2))
                 }
 
         return None
 
-    def calculate_transits(self, natal_chart: Dict, target_date: str) -> Dict:
+    def _calculate_transit_times(
+        self,
+        planet_key: str,
+        natal_longitude: float,
+        target_date: datetime,
+        aspect_type: str,
+        timezone: pytz.BaseTzInfo
+    ) -> Optional[Dict]:
+        """
+        Рассчитывает время начала, окончания и точного аспекта для транзита.
+        
+        Args:
+            planet_key: Ключ транзитной планеты
+            natal_longitude: Долгота натальной планеты
+            target_date: Дата для поиска транзита
+            aspect_type: Тип аспекта (conjunction, opposition, etc.)
+            timezone: Временная зона для возврата времени
+            
+        Returns:
+            Словарь с временами транзита или None при ошибке
+        """
+        try:
+            # Находим орбис для данного аспекта
+            orb = self.get_orb(aspect_type)
+            if orb == 0:
+                return None
+            
+            # Находим точный момент аспекта, итерируя по времени вокруг целевой даты
+            # Преобразуем целевую дату в юлианскую дату
+            target_jd = swe.julday(
+                target_date.year,
+                target_date.month,
+                target_date.day,
+                target_date.hour + target_date.minute / 60.0 + target_date.second / 3600.0,
+                swe.GREG_CAL
+            )
+            
+            # Ищем точный момент аспекта, начиная с целевой даты
+            exact_jd = None
+            min_orb = float('inf')
+            
+            # Поиск в диапазоне ±3 дня с шагом 1 час
+            for day_offset in range(-3, 4):
+                for hour_offset in range(0, 24):
+                    jd = target_jd + day_offset + hour_offset / 24.0
+                    transit_pos = self._calculate_planet_position(planet_key, jd)
+                    
+                    if transit_pos:
+                        transit_lon = transit_pos['longitude']
+                        aspect_check = self._calculate_aspect_between(transit_lon, natal_longitude, orb)
+                        
+                        if aspect_check and aspect_check.get('type') == aspect_type:
+                            current_orb = aspect_check.get('orb', float('inf'))
+                            if current_orb < min_orb:
+                                min_orb = current_orb
+                                exact_jd = jd
+            
+            if exact_jd is None:
+                return None
+            
+            # Рассчитываем временные границы транзита (вход и выход из орбиса)
+            # Ищем момент входа в орбис (двигаемся назад от точного аспекта)
+            transit_start_jd = None
+            for i in range(48):  # Проверяем до 2 дней назад
+                jd = exact_jd - i / 24.0
+                transit_pos = self._calculate_planet_position(planet_key, jd)
+                
+                if transit_pos:
+                    transit_lon = transit_pos['longitude']
+                    aspect_check = self._calculate_aspect_between(transit_lon, natal_longitude, orb)
+                    
+                    if aspect_check and aspect_check.get('type') == aspect_type:
+                        transit_start_jd = jd
+                    else:
+                        break
+            
+            # Ищем момент выхода из орбиса (двигаемся вперед от точного аспекта)
+            transit_end_jd = None
+            for i in range(48):  # Проверяем до 2 дней вперед
+                jd = exact_jd + i / 24.0
+                transit_pos = self._calculate_planet_position(planet_key, jd)
+                
+                if transit_pos:
+                    transit_lon = transit_pos['longitude']
+                    aspect_check = self._calculate_aspect_between(transit_lon, natal_longitude, orb)
+                    
+                    if aspect_check and aspect_check.get('type') == aspect_type:
+                        transit_end_jd = jd
+                    else:
+                        break
+            
+            # Преобразуем юлианские даты в datetime с учетом timezone
+            result = {}
+            
+            if exact_jd:
+                exact_dt = self._julian_to_datetime(exact_jd, timezone)
+                result['exact_time'] = exact_dt.isoformat()
+            
+            if transit_start_jd:
+                start_dt = self._julian_to_datetime(transit_start_jd, timezone)
+                result['start_time'] = start_dt.isoformat()
+            
+            if transit_end_jd:
+                end_dt = self._julian_to_datetime(transit_end_jd, timezone)
+                result['end_time'] = end_dt.isoformat()
+            
+            return result if result else None
+            
+        except Exception as e:
+            print(f"⚠️ Ошибка расчета времени транзита: {e}")
+            return None
+
+    def _julian_to_datetime(self, jd: float, timezone: pytz.BaseTzInfo) -> datetime:
+        """
+        Преобразует юлианскую дату в datetime с учетом временной зоны.
+        """
+        # Используем Swiss Ephemeris для преобразования
+        year, month, day, hour_frac = swe.revjul(jd, swe.GREG_CAL)
+        hour = int(hour_frac)
+        minute = int((hour_frac - hour) * 60)
+        second = int(((hour_frac - hour) * 60 - minute) * 60)
+        
+        dt = datetime(year, month, day, hour, minute, second, tzinfo=pytz.UTC)
+        # Конвертируем в нужную временную зону
+        return dt.astimezone(timezone)
+
+    def calculate_transits(
+        self, 
+        natal_chart: Dict, 
+        target_date: str,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        timezone_name: Optional[str] = None
+    ) -> Dict:
         """
         Расчет транзитов на конкретную дату используя Swiss Ephemeris.
+        
+        Args:
+            natal_chart: Словарь с данными натальной карты
+            target_date: Дата для расчета транзитов (формат: "YYYY-MM-DD")
+            latitude: Широта места для расчета (опционально)
+            longitude: Долгота места для расчета (опционально)
+            timezone_name: Название временной зоны (опционально)
         """
         try:
             target_dt = datetime.strptime(target_date, "%Y-%m-%d")
@@ -542,6 +683,14 @@ class ProfessionalAstroService:
             target_dt = target_dt.replace(hour=12, minute=0, second=0)
             # Добавляем часовой пояс UTC для транзитов
             target_dt = pytz.UTC.localize(target_dt)
+            
+            # Определяем временную зону для расчета времени транзитов
+            tz = pytz.UTC
+            if timezone_name:
+                try:
+                    tz = pytz.timezone(timezone_name)
+                except pytz.exceptions.UnknownTimeZoneError:
+                    pass  # Используем UTC по умолчанию
             
             # Преобразуем в юлианскую дату
             jd = swe.julday(
@@ -573,16 +722,44 @@ class ProfessionalAstroService:
                     
                     # Ищем аспект с натальной картой
                     aspect = None
+                    transit_start_time = None
+                    transit_end_time = None
+                    exact_aspect_time = None
+                    
                     if planet_key in natal_planets:
                         natal_lon = natal_planets[planet_key].get('longitude', 0)
                         aspect = self._calculate_aspect_between(transit_lon, natal_lon)
+                        
+                        # Если есть аспект, рассчитываем время начала и окончания транзита
+                        if aspect:
+                            transit_times = self._calculate_transit_times(
+                                planet_key=planet_key,
+                                natal_longitude=natal_lon,
+                                target_date=target_dt,
+                                aspect_type=aspect.get('type'),
+                                timezone=tz
+                            )
+                            if transit_times:
+                                transit_start_time = transit_times.get('start_time')
+                                transit_end_time = transit_times.get('end_time')
+                                exact_aspect_time = transit_times.get('exact_time')
                     
-                    transits_data[planet_key] = {
+                    transit_info = {
                         'transit_longitude': transit_lon,
                         'transit_sign': transit_sign,
                         'aspect': aspect,
                         'is_retrograde': is_retrograde
                     }
+                    
+                    # Добавляем время транзита, если оно рассчитано
+                    if transit_start_time:
+                        transit_info['transit_start_time'] = transit_start_time
+                    if transit_end_time:
+                        transit_info['transit_end_time'] = transit_end_time
+                    if exact_aspect_time:
+                        transit_info['exact_aspect_time'] = exact_aspect_time
+                    
+                    transits_data[planet_key] = transit_info
 
             return {
                 'success': True,

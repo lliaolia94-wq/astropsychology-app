@@ -351,22 +351,26 @@ class GeocodingService:
         self, 
         birth_date,  # Может быть date или datetime
         birth_time_local,  # Может быть time или datetime
-        timezone_name: str
+        timezone_name: Optional[str] = None,
+        utc_offset_hours: Optional[float] = None
     ) -> datetime:
         """
         Рассчитывает UTC время на основе локального времени и временной зоны.
+        Поддерживает явное указание UTC offset для ручной корректировки.
         
         Args:
             birth_date: Дата рождения (date или datetime)
             birth_time_local: Время рождения (time или datetime)
             timezone_name: Название временной зоны (например, "Europe/Moscow")
+            utc_offset_hours: Явный UTC offset в часах (например, +3.0, -4.0, +3.5).
+                             Если указано, используется вместо автоматического определения по timezone_name.
+                             Это позволяет корректировать время при проблемах с летним/зимним временем.
             
         Returns:
             datetime объект в UTC
         """
         try:
-            from datetime import date, time, datetime
-            tz = pytz.timezone(timezone_name)
+            from datetime import date, time, datetime, timedelta
             
             # Обрабатываем birth_date - может быть date или datetime
             if isinstance(birth_date, datetime):
@@ -386,11 +390,48 @@ class GeocodingService:
             
             # Объединяем дату и время
             local_dt = datetime.combine(date_obj, time_obj)
-            # Локализуем в указанной временной зоне
-            local_dt = tz.localize(local_dt)
-            # Конвертируем в UTC
-            utc_dt = local_dt.astimezone(pytz.UTC)
-            return utc_dt.replace(tzinfo=None)  # Убираем timezone для хранения в БД
+            
+            # Если указан явный UTC offset, используем его
+            if utc_offset_hours is not None:
+                # Вычисляем UTC время напрямую через timedelta
+                offset = timedelta(hours=utc_offset_hours)
+                utc_dt = local_dt - offset
+                return utc_dt
+            elif timezone_name:
+                # Используем автоматическое определение через pytz
+                tz = pytz.timezone(timezone_name)
+                # Локализуем в указанной временной зоне (pytz учитывает летнее/зимнее время)
+                local_dt = tz.localize(local_dt, is_dst=None)  # is_dst=None вызывает исключение при неоднозначности
+                # Конвертируем в UTC
+                utc_dt = local_dt.astimezone(pytz.UTC)
+                return utc_dt.replace(tzinfo=None)  # Убираем timezone для хранения в БД
+            else:
+                raise ValueError("Необходимо указать либо timezone_name, либо utc_offset_hours")
+        except pytz.AmbiguousTimeError:
+            # Если время неоднозначно (переход на летнее/зимнее время), используем DST
+            print(f"⚠️ Неоднозначное время для {birth_date} {birth_time_local} в {timezone_name}. Используется DST=True")
+            try:
+                tz = pytz.timezone(timezone_name)
+                local_dt = tz.localize(local_dt, is_dst=True)
+                utc_dt = local_dt.astimezone(pytz.UTC)
+                return utc_dt.replace(tzinfo=None)
+            except Exception as e:
+                print(f"Ошибка при обработке неоднозначного времени: {e}")
+                raise
+        except pytz.NonExistentTimeError:
+            # Если время не существует (пропущенный час при переходе на летнее время)
+            print(f"⚠️ Несуществующее время для {birth_date} {birth_time_local} в {timezone_name}. Добавляется 1 час")
+            try:
+                from datetime import timedelta
+                tz = pytz.timezone(timezone_name)
+                # Добавляем час для перехода через несуществующее время
+                local_dt = local_dt + timedelta(hours=1)
+                local_dt = tz.localize(local_dt, is_dst=None)
+                utc_dt = local_dt.astimezone(pytz.UTC)
+                return utc_dt.replace(tzinfo=None)
+            except Exception as e:
+                print(f"Ошибка при обработке несуществующего времени: {e}")
+                raise
         except Exception as e:
             print(f"Ошибка расчета UTC времени: {e}")
             # Fallback: возвращаем локальное время как есть

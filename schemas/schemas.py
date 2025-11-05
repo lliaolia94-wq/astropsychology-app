@@ -17,6 +17,13 @@ class UserCreate(BaseModel):
     birth_latitude: Optional[float] = Field(None, ge=-90, le=90, description="Широта от -90 до +90")
     birth_longitude: Optional[float] = Field(None, ge=-180, le=180, description="Долгота от -180 до +180")
     timezone_name: Optional[str] = Field(None, description="Временная зона (например, Europe/Moscow)")
+    birth_time_utc_offset: Optional[float] = Field(None, ge=-12, le=14, description="UTC offset в часах для ручной корректировки (например, +3.0, -4.0, +3.5)")
+    # Поля для текущего местоположения
+    current_location_name: Optional[str] = Field(None, description="Название текущего города/места")
+    current_country: Optional[str] = Field(None, description="Текущая страна")
+    current_latitude: Optional[float] = Field(None, ge=-90, le=90, description="Текущая широта от -90 до +90")
+    current_longitude: Optional[float] = Field(None, ge=-180, le=180, description="Текущая долгота от -180 до +180")
+    current_timezone_name: Optional[str] = Field(None, description="Временная зона текущего места")
 
     @validator('birth_latitude')
     def validate_latitude(cls, v):
@@ -32,6 +39,30 @@ class UserCreate(BaseModel):
         if v is not None:
             if not (-180 <= v <= 180):
                 raise ValueError('Долгота должна быть в диапазоне от -180 до +180 градусов')
+        return v
+
+    @validator('current_latitude')
+    def validate_current_latitude(cls, v):
+        """Валидация текущей широты"""
+        if v is not None:
+            if not (-90 <= v <= 90):
+                raise ValueError('Текущая широта должна быть в диапазоне от -90 до +90 градусов')
+        return v
+
+    @validator('current_longitude')
+    def validate_current_longitude(cls, v):
+        """Валидация текущей долготы"""
+        if v is not None:
+            if not (-180 <= v <= 180):
+                raise ValueError('Текущая долгота должна быть в диапазоне от -180 до +180 градусов')
+        return v
+
+    @validator('birth_time_utc_offset')
+    def validate_utc_offset(cls, v):
+        """Валидация UTC offset"""
+        if v is not None:
+            if not (-12 <= v <= 14):
+                raise ValueError('UTC offset должен быть в диапазоне от -12 до +14 часов')
         return v
 
     class Config:
@@ -64,6 +95,12 @@ class UserResponse(BaseModel):
     birth_latitude: Optional[float] = None
     birth_longitude: Optional[float] = None
     timezone_name: Optional[str] = None
+    # Поля для текущего местоположения
+    current_location_name: Optional[str] = None
+    current_country: Optional[str] = None
+    current_latitude: Optional[float] = None
+    current_longitude: Optional[float] = None
+    current_timezone_name: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -315,6 +352,7 @@ class UserProfileUpdate(BaseModel):
     birth_latitude: Optional[float] = Field(None, ge=-90, le=90, description="Широта от -90 до +90")
     birth_longitude: Optional[float] = Field(None, ge=-180, le=180, description="Долгота от -180 до +180")
     timezone_name: Optional[str] = None
+    birth_time_utc_offset: Optional[float] = Field(None, ge=-12, le=14, description="UTC offset в часах для ручной корректировки (например, +3.0, -4.0, +3.5). Если указано, используется вместо автоматического определения по timezone_name")
 
     @validator('birth_latitude')
     def validate_latitude(cls, v):
@@ -332,6 +370,14 @@ class UserProfileUpdate(BaseModel):
                 raise ValueError('Долгота должна быть в диапазоне от -180 до +180 градусов')
         return v
 
+    @validator('birth_time_utc_offset')
+    def validate_utc_offset(cls, v):
+        """Валидация UTC offset"""
+        if v is not None:
+            if not (-12 <= v <= 14):
+                raise ValueError('UTC offset должен быть в диапазоне от -12 до +14 часов')
+        return v
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -341,7 +387,8 @@ class UserProfileUpdate(BaseModel):
                 "birth_country": "Россия",
                 "birth_latitude": 55.7558,
                 "birth_longitude": 37.6173,
-                "timezone_name": "Europe/Moscow"
+                "timezone_name": "Europe/Moscow",
+                "birth_time_utc_offset": 3.0
             }
         }
 
@@ -353,6 +400,7 @@ class ManualCoordinatesRequest(BaseModel):
     birth_latitude: float = Field(..., ge=-90, le=90, description="Широта от -90 до +90")
     birth_longitude: float = Field(..., ge=-180, le=180, description="Долгота от -180 до +180")
     timezone_name: Optional[str] = None
+    birth_time_utc_offset: Optional[float] = Field(None, ge=-12, le=14, description="UTC offset в часах для ручной корректировки (например, +3.0, -4.0, +3.5). Если указано, используется вместо автоматического определения по timezone_name")
 
     @validator('birth_latitude')
     def validate_latitude(cls, v):
@@ -368,6 +416,14 @@ class ManualCoordinatesRequest(BaseModel):
             raise ValueError('Долгота должна быть в диапазоне от -180 до +180 градусов')
         return v
 
+    @validator('birth_time_utc_offset')
+    def validate_utc_offset(cls, v):
+        """Валидация UTC offset"""
+        if v is not None:
+            if not (-12 <= v <= 14):
+                raise ValueError('UTC offset должен быть в диапазоне от -12 до +14 часов')
+        return v
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -375,7 +431,8 @@ class ManualCoordinatesRequest(BaseModel):
                 "birth_country": "Россия",
                 "birth_latitude": 55.7558,
                 "birth_longitude": 37.6173,
-                "timezone_name": "Europe/Moscow"
+                "timezone_name": "Europe/Moscow",
+                "birth_time_utc_offset": 3.0
             }
         }
 
@@ -416,6 +473,7 @@ class PlanetPositionResponse(BaseModel):
     planet_name: str
     longitude: float
     zodiac_sign: str
+    degree_in_sign: float = Field(..., description="Градусы внутри знака (0-29.99)")
     house: int
     is_retrograde: bool = False
 
@@ -440,6 +498,7 @@ class HouseCuspidResponse(BaseModel):
     house_number: int
     longitude: float
     zodiac_sign: str
+    degree_in_sign: float = Field(..., description="Градусы внутри знака (0-29.99)")
 
     class Config:
         from_attributes = True
@@ -449,6 +508,7 @@ class AngleResponse(BaseModel):
     """Угол (ASC или MC)"""
     longitude: float
     zodiac_sign: str
+    degree_in_sign: float = Field(..., description="Градусы внутри знака (0-29.99)")
 
 
 class NatalChartResponse(BaseModel):

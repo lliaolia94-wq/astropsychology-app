@@ -25,6 +25,14 @@ class User(Base):
     birth_latitude = Column(DECIMAL(9, 6), nullable=True)  # Географическая широта
     birth_longitude = Column(DECIMAL(9, 6), nullable=True)  # Географическая долгота
     timezone_name = Column(String(100), nullable=True)  # Название временной зоны (например, "Europe/Moscow")
+    birth_time_utc_offset = Column(DECIMAL(5, 2), nullable=True)  # UTC offset в часах для ручной корректировки (например, +3.0, -4.0, +3.5)
+    
+    # Поля для текущего местоположения пользователя (для расчета транзитов)
+    current_location_name = Column(String(200), nullable=True)  # Название текущего города/места
+    current_country = Column(String(100), nullable=True)  # Текущая страна
+    current_latitude = Column(DECIMAL(9, 6), nullable=True)  # Текущая географическая широта
+    current_longitude = Column(DECIMAL(9, 6), nullable=True)  # Текущая географическая долгота
+    current_timezone_name = Column(String(100), nullable=True)  # Название временной зоны текущего места
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),

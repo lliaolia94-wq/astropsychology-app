@@ -35,6 +35,18 @@ async def update_current_user(
     if user_data.name is not None:
         current_user.name = user_data.name
     
+    # Обновление текущего местоположения
+    if user_data.current_location_name is not None:
+        current_user.current_location_name = user_data.current_location_name
+    if user_data.current_country is not None:
+        current_user.current_country = user_data.current_country
+    if user_data.current_latitude is not None:
+        current_user.current_latitude = user_data.current_latitude
+    if user_data.current_longitude is not None:
+        current_user.current_longitude = user_data.current_longitude
+    if user_data.current_timezone_name is not None:
+        current_user.current_timezone_name = user_data.current_timezone_name
+    
     # Обновление старых полей для обратной совместимости
     if user_data.birth_date is not None:
         # Валидация даты
@@ -105,7 +117,8 @@ async def update_current_user(
             birth_country=user_data.birth_country,
             birth_latitude=user_data.birth_latitude,
             birth_longitude=user_data.birth_longitude,
-            timezone_name=user_data.timezone_name
+            timezone_name=user_data.timezone_name,
+            birth_time_utc_offset=user_data.birth_time_utc_offset
         )
         
         if not result['success']:
@@ -168,7 +181,8 @@ async def update_user_profile(
         birth_country=user_data.birth_country,
         birth_latitude=user_data.birth_latitude,
         birth_longitude=user_data.birth_longitude,
-        timezone_name=user_data.timezone_name
+        timezone_name=user_data.timezone_name,
+        birth_time_utc_offset=user_data.birth_time_utc_offset
     )
     
     if not result['success']:
