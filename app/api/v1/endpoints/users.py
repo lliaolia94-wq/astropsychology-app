@@ -8,6 +8,7 @@ from app.models.database.models import User
 from app.models.schemas.schemas import UserCreate, UserResponse, UserProfileUpdate
 from app.api.v1.endpoints.auth import get_current_user
 from app.services.natal_chart_service import natal_chart_service
+from app.services.geocoding_service import geocoding_service
 
 router = APIRouter(tags=["Users"])
 
@@ -35,17 +36,48 @@ async def update_current_user(
     if user_data.name is not None:
         current_user.name = user_data.name
     
-    # Обновление текущего местоположения
+    # Обновление текущего местоположения с автоматическим геокодированием
     if user_data.current_location_name is not None:
         current_user.current_location_name = user_data.current_location_name
-    if user_data.current_country is not None:
-        current_user.current_country = user_data.current_country
-    if user_data.current_latitude is not None:
-        current_user.current_latitude = user_data.current_latitude
-    if user_data.current_longitude is not None:
-        current_user.current_longitude = user_data.current_longitude
-    if user_data.current_timezone_name is not None:
-        current_user.current_timezone_name = user_data.current_timezone_name
+        
+        # Автоматическое геокодирование, если координаты не указаны
+        if (user_data.current_latitude is None or user_data.current_longitude is None):
+            geo_result = geocoding_service.geocode_location(
+                user_data.current_location_name,
+                user_data.current_country
+            )
+            
+            if geo_result.get('success'):
+                # Город найден в БД
+                city_data = geo_result['data']
+                current_user.current_latitude = city_data['lat']
+                current_user.current_longitude = city_data['lon']
+                if not user_data.current_timezone_name and city_data.get('timezone'):
+                    current_user.current_timezone_name = city_data['timezone']
+            else:
+                # Если геокодирование не удалось, но координаты указаны вручную - используем их
+                if user_data.current_latitude is not None and user_data.current_longitude is not None:
+                    current_user.current_latitude = user_data.current_latitude
+                    current_user.current_longitude = user_data.current_longitude
+                # Если координаты не найдены и не указаны вручную - просто сохраняем название
+                # (не возвращаем ошибку, чтобы не ломать работу старого API)
+        
+        if user_data.current_country is not None:
+            current_user.current_country = user_data.current_country
+        if user_data.current_latitude is not None:
+            current_user.current_latitude = user_data.current_latitude
+        if user_data.current_longitude is not None:
+            current_user.current_longitude = user_data.current_longitude
+        if user_data.current_timezone_name is not None:
+            current_user.current_timezone_name = user_data.current_timezone_name
+        elif current_user.current_latitude and current_user.current_longitude and not current_user.current_timezone_name:
+            # Определяем временную зону по координатам (только если не указана)
+            tz = geocoding_service.get_timezone_by_coordinates(
+                float(current_user.current_latitude),
+                float(current_user.current_longitude)
+            )
+            if tz:
+                current_user.current_timezone_name = tz
     
     # Обновление старых полей для обратной совместимости
     if user_data.birth_date is not None:
@@ -122,10 +154,29 @@ async def update_current_user(
         )
         
         if not result['success']:
-            # Если ошибка геокодирования, но есть старые поля - сохраняем их
-            if user_data.birth_place and not current_user.birth_place:
-                current_user.birth_place = user_data.birth_place
-            db.commit()
+            # Если ошибка геокодирования, проверяем, нужно ли вернуть ошибку
+            # Если указаны только birth_location_name без координат, возвращаем ошибку
+            if user_data.birth_location_name and (user_data.birth_latitude is None and user_data.birth_longitude is None):
+                # Всегда возвращаем ошибку, если город не найден и координаты не указаны
+                # (сервис всегда возвращает requires_manual_input=True при ошибке геокодирования)
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        'error': result.get('error', 'Город не найден'),
+                        'error_code': result.get('error_code', 'CITY_NOT_FOUND'),
+                        'requires_manual_input': result.get('requires_manual_input', True),
+                        'suggestions': result.get('suggestions', []),
+                        'message': result.get('message', f'Не удалось найти координаты для "{user_data.birth_location_name}". Пожалуйста, укажите координаты вручную.')
+                    }
+                )
+            else:
+                # Если координаты указаны вручную, но есть другая ошибка - просто сохраняем
+                if user_data.birth_place and not current_user.birth_place:
+                    current_user.birth_place = user_data.birth_place
+                db.commit()
+                db.refresh(current_user)
+        else:
+            # Успешное обновление - сервис уже сделал commit, но обновляем объект
             db.refresh(current_user)
     else:
         # Только старые поля - просто сохраняем
@@ -145,7 +196,8 @@ async def update_user_profile(
     Обновление расширенного профиля пользователя с данными для расчета натальной карты.
     
     Автоматически:
-    - Геокодирует место рождения, если координаты не указаны
+    - Геокодирует место рождения, если указан birth_location_name (координаты не обязательны)
+    - Геокодирует текущее местоположение, если указан current_location_name (координаты не обязательны)
     - Рассчитывает UTC время рождения
     - Пересчитывает натальную карту при обновлении данных
     """
@@ -171,6 +223,61 @@ async def update_user_profile(
                 detail="Неверный формат времени. Используйте: ЧЧ:ММ"
             )
     
+    # Обработка текущего местоположения с автоматическим геокодированием
+    if user_data.current_location_name is not None:
+        current_user.current_location_name = user_data.current_location_name
+        
+        # Автоматическое геокодирование, если координаты не указаны
+        if (user_data.current_latitude is None or user_data.current_longitude is None):
+            geo_result = geocoding_service.geocode_location(
+                user_data.current_location_name,
+                user_data.current_country
+            )
+            
+            if geo_result.get('success'):
+                # Город найден в БД
+                city_data = geo_result['data']
+                current_user.current_latitude = city_data['lat']
+                current_user.current_longitude = city_data['lon']
+                if not user_data.current_timezone_name and city_data.get('timezone'):
+                    current_user.current_timezone_name = city_data['timezone']
+            else:
+                # Если геокодирование не удалось, но координаты указаны вручную - используем их
+                if user_data.current_latitude is not None and user_data.current_longitude is not None:
+                    current_user.current_latitude = user_data.current_latitude
+                    current_user.current_longitude = user_data.current_longitude
+                else:
+                    # Если координаты не найдены и не указаны вручную - возвращаем ошибку
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            'error': geo_result.get('error', 'Город не найден'),
+                            'error_code': geo_result.get('error_code', 'CITY_NOT_FOUND'),
+                            'requires_manual_input': geo_result.get('requires_manual_input', True),
+                            'suggestions': geo_result.get('suggestions', []),
+                            'message': f'Не удалось найти координаты для "{user_data.current_location_name}". Пожалуйста, укажите координаты вручную.'
+                        }
+                    )
+        else:
+            # Используем предоставленные координаты
+            current_user.current_latitude = user_data.current_latitude
+            current_user.current_longitude = user_data.current_longitude
+        
+        # Обновляем страну и временную зону, если указаны
+        if user_data.current_country is not None:
+            current_user.current_country = user_data.current_country
+        
+        if user_data.current_timezone_name is not None:
+            current_user.current_timezone_name = user_data.current_timezone_name
+        elif current_user.current_latitude and current_user.current_longitude and not current_user.current_timezone_name:
+            # Определяем временную зону по координатам (только если не указана)
+            tz = geocoding_service.get_timezone_by_coordinates(
+                float(current_user.current_latitude),
+                float(current_user.current_longitude)
+            )
+            if tz:
+                current_user.current_timezone_name = tz
+    
     # Используем сервис для обновления профиля и автоматического пересчета карты
     result = natal_chart_service.update_user_profile_and_calculate(
         user=current_user,
@@ -191,6 +298,7 @@ async def update_user_profile(
             detail=result.get('error', 'Ошибка обновления профиля')
         )
     
+    db.commit()
     db.refresh(current_user)
     return current_user
 

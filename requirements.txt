@@ -8,6 +8,7 @@ python-dotenv
 pytz
 skyfield
 requests
+httpx>=0.24.0
 openai
 tiktoken
 aiofiles

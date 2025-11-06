@@ -72,7 +72,12 @@ class ContextService:
         
         if active_session:
             # Проверяем время бездействия
-            time_since_update = datetime.now(timezone.utc) - active_session.updated_at
+            now = datetime.now(timezone.utc)
+            updated_at = active_session.updated_at
+            # Нормализуем updated_at к timezone-aware, если он naive
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            time_since_update = now - updated_at
             
             if time_since_update < timedelta(hours=self.SESSION_TIMEOUT_HOURS):
                 # Сессия активна, обновляем время
@@ -174,7 +179,7 @@ class ContextService:
 Заголовок должен отражать суть разговора. Верни только заголовок, без дополнительных слов.
 """
             
-            title = self.ai_service.chat(prompt)
+            title = self.ai_service.chat_sync(prompt)
             # Очищаем заголовок от лишних символов
             title = title.strip().strip('"').strip("'")[:50]
             return title if title else f"Сессия {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
@@ -197,7 +202,14 @@ class ContextService:
         if not session:
             return True
         
-        time_since_update = datetime.now(timezone.utc) - session.updated_at
+        now = datetime.now(timezone.utc)
+        # Нормализуем updated_at к timezone-aware, если он naive
+        updated_at = session.updated_at
+        if updated_at.tzinfo is None:
+            # Если datetime naive, предполагаем UTC
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        
+        time_since_update = now - updated_at
         return time_since_update >= timedelta(hours=self.SESSION_TIMEOUT_HOURS)
     
     def check_topic_change(self, message: str) -> bool:
@@ -243,7 +255,12 @@ class ContextService:
         # 2. Превышение 30 минут бездействия
         session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
         if session:
-            time_since_update = datetime.now(timezone.utc) - session.updated_at
+            now = datetime.now(timezone.utc)
+            updated_at = session.updated_at
+            # Нормализуем updated_at к timezone-aware, если он naive
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            time_since_update = now - updated_at
             if time_since_update >= timedelta(minutes=self.INACTIVITY_TIMEOUT_MINUTES):
                 return True, "timeout"
         

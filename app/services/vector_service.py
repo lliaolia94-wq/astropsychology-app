@@ -22,53 +22,67 @@ class VectorService:
     COLLECTION_NAME = "context_vectors"
     
     def __init__(self):
-        """Инициализация сервиса"""
-        # Настройки Qdrant из переменных окружения
-        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-        qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
-        qdrant_api_key = os.getenv("QDRANT_API_KEY", None)
+        """Инициализация сервиса (ленивая загрузка компонентов)"""
+        # Настройки Qdrant из переменных окружения (сохраняем для ленивой инициализации)
+        self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        self.qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
+        self.qdrant_api_key = os.getenv("QDRANT_API_KEY", None)
         
-        # Инициализация клиента Qdrant
+        # Ленивая инициализация: клиент и модель загружаются только при использовании
+        self.client = None
+        self.embedding_model = None
+        self._client_initialized = False
+        self._model_initialized = False
+    
+    def _ensure_client_initialized(self):
+        """Обеспечивает инициализацию клиента Qdrant (ленивая загрузка)"""
+        if self._client_initialized:
+            return
+        
         try:
-            if qdrant_api_key:
+            if self.qdrant_api_key:
                 self.client = QdrantClient(
-                    url=f"http://{qdrant_host}:{qdrant_port}",
-                    api_key=qdrant_api_key,
+                    url=f"http://{self.qdrant_host}:{self.qdrant_port}",
+                    api_key=self.qdrant_api_key,
                     timeout=5
                 )
             else:
                 self.client = QdrantClient(
-                    host=qdrant_host,
-                    port=qdrant_port,
+                    host=self.qdrant_host,
+                    port=self.qdrant_port,
                     timeout=5
                 )
             # Проверка подключения
             self.client.get_collections()
-            logger.info(f"✅ Qdrant клиент подключен: {qdrant_host}:{qdrant_port}")
+            logger.info(f"✅ Qdrant клиент подключен: {self.qdrant_host}:{self.qdrant_port}")
+            # Инициализация коллекции при первом подключении
+            self._ensure_collection_exists()
+            self._client_initialized = True
         except Exception as e:
             logger.warning(f"⚠️ Qdrant недоступен: {str(e)}. Векторный поиск будет отключен.")
             logger.warning("   Для запуска Qdrant: docker run -d -p 6333:6333 qdrant/qdrant")
             self.client = None
+            self._client_initialized = True  # Помечаем как инициализированный, чтобы не повторять попытки
+    
+    def _ensure_model_loaded(self):
+        """Обеспечивает загрузку модели эмбеддингов (ленивая загрузка)"""
+        if self._model_initialized:
+            return
         
-        # Загрузка модели для эмбеддингов
-        self.embedding_model = None
         try:
             model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
             logger.info(f"Загрузка модели эмбеддингов: {model_name}... (это может занять время при первом запуске)")
             self.embedding_model = SentenceTransformer(model_name)
             logger.info(f"✅ Модель эмбеддингов загружена: {model_name}")
+            self._model_initialized = True
         except ImportError:
             logger.warning("⚠️ Библиотека sentence-transformers не установлена. Векторизация недоступна.")
             logger.warning("   Установите: pip install sentence-transformers")
+            self._model_initialized = True
         except Exception as e:
             logger.warning(f"⚠️ Ошибка загрузки модели эмбеддингов: {str(e)}")
             logger.warning("   Векторизация будет недоступна. Проверьте интернет-соединение и место на диске.")
-        
-        # Инициализация коллекции при старте (только если Qdrant доступен)
-        if self.client:
-            self._ensure_collection_exists()
-        else:
-            logger.warning("⚠️ Коллекция Qdrant не создана (Qdrant недоступен)")
+            self._model_initialized = True
     
     def _ensure_collection_exists(self):
         """Создание коллекции если её нет"""
@@ -104,7 +118,13 @@ class VectorService:
         Returns:
             Список чисел (вектор) или None при ошибке
         """
-        if not self.embedding_model or not text:
+        if not text:
+            return None
+        
+        # Загружаем модель при необходимости (ленивая загрузка)
+        self._ensure_model_loaded()
+        
+        if not self.embedding_model:
             return None
         
         try:
@@ -131,6 +151,9 @@ class VectorService:
         Returns:
             True при успехе, False при ошибке
         """
+        # Инициализируем клиент при необходимости (ленивая загрузка)
+        self._ensure_client_initialized()
+        
         if not self.client:
             logger.warning("Qdrant клиент не инициализирован")
             return False
@@ -187,6 +210,9 @@ class VectorService:
         Returns:
             Список найденных записей с метаданными
         """
+        # Инициализируем клиент при необходимости (ленивая загрузка)
+        self._ensure_client_initialized()
+        
         if not self.client:
             logger.warning("Qdrant клиент не инициализирован")
             return []
@@ -254,6 +280,9 @@ class VectorService:
         Returns:
             True при успехе, False при ошибке
         """
+        # Инициализируем клиент при необходимости (ленивая загрузка)
+        self._ensure_client_initialized()
+        
         if not self.client:
             logger.warning("Qdrant клиент не инициализирован")
             return False
@@ -284,6 +313,9 @@ class VectorService:
         Returns:
             True при успехе, False при ошибке
         """
+        # Инициализируем клиент при необходимости (ленивая загрузка)
+        self._ensure_client_initialized()
+        
         if not self.client:
             logger.warning("Qdrant клиент не инициализирован")
             return False

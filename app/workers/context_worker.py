@@ -73,7 +73,7 @@ def structure_context_with_llm(
 Если какого-то поля нет, верни null для него.
 """
         
-        response = ai_service.chat(structure_prompt)
+        response = ai_service.chat_sync(structure_prompt)
         
         # Пытаемся извлечь JSON из ответа
         import json

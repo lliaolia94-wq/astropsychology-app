@@ -17,7 +17,8 @@ class GeocodingService:
         # Определяем корень проекта: из app/services/ поднимаемся на 2 уровня вверх
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         self.cities_db_path = os.path.join(project_root, 'data', 'cities_db.json')
-        self.cities_db = self._load_cities_db()
+        # Ленивая загрузка: база загружается только при первом использовании
+        self.cities_db = None
         
         # Резервный геокодер (используется только если город не найден в локальной БД)
         self.geocoder = None  # Инициализируем только при необходимости
@@ -34,6 +35,11 @@ class GeocodingService:
             'Kazakhstan': 'KZ',
             # Добавить другие страны по необходимости
         }
+
+    def _ensure_cities_db_loaded(self):
+        """Обеспечивает загрузку базы городов (ленивая инициализация)"""
+        if self.cities_db is None:
+            self.cities_db = self._load_cities_db()
 
     def _load_cities_db(self) -> Dict:
         """Загружает локальную базу данных городов из JSON файла"""
@@ -113,6 +119,32 @@ class GeocodingService:
                 return key.split(',')[0].strip()
             return key
         
+        # Функция для нормализации названия - убирает типы поселений и суффиксы
+        def normalize_location_name(name: str) -> str:
+            """Нормализует название места для сравнения"""
+            name = name.lower().strip()
+            # Убираем типы поселений
+            settlement_types = ['село', 'деревня', 'поселок', 'посёлок', 'город', 'городок', 
+                              'пгт', 'рабочий посёлок', 'станица', 'хутор', 'аул', 'кишлак']
+            for stype in settlement_types:
+                # Убираем тип поселения в начале или конце
+                if name.startswith(stype + ' '):
+                    name = name[len(stype) + 1:].strip()
+                elif name.endswith(' ' + stype):
+                    name = name[:-len(stype) - 1].strip()
+            return name
+        
+        # Функция для получения корня названия (для частичного совпадения)
+        def get_name_root(name: str) -> str:
+            """Получает корень названия, убирая суффиксы"""
+            name = normalize_location_name(name)
+            # Убираем типичные суффиксы русских названий
+            suffixes = ['ское', 'ск', 'скoe', 'кая', 'кий', 'кое', 'ая', 'ое', 'ий']
+            for suffix in suffixes:
+                if name.endswith(suffix) and len(name) > len(suffix):
+                    return name[:-len(suffix)]
+            return name
+        
         # Маппинг латиница <-> кириллица для популярных городов
         city_name_variants = {
             'томск': ['tomsk', 'томск'],
@@ -140,8 +172,12 @@ class GeocodingService:
                 result += translit_map.get(char, char)
             return result
         
+        # Нормализуем запрос
+        normalized_query = normalize_location_name(location_name)
+        query_root = get_name_root(location_name)
+        
         # Получаем все варианты поискового запроса
-        query_variants = [location_lower]
+        query_variants = [location_lower, normalized_query, query_root]
         
         # Добавляем варианты из маппинга, если есть
         if location_lower in city_name_variants:
@@ -153,33 +189,71 @@ class GeocodingService:
             if translit != location_lower and translit not in query_variants:
                 query_variants.append(translit)
         
+        # Убираем дубликаты
+        query_variants = list(dict.fromkeys(query_variants))
+        
+        # Загружаем базу городов при необходимости (ленивая загрузка)
+        self._ensure_cities_db_loaded()
+        
         # Ищем точное совпадение в локальной БД
+        exact_matches = []
+        partial_matches = []
+        
         for city_key, city_data in self.cities_db.items():
             city_name_only = get_city_name_only(city_key)
             city_name_lower = city_name_only.lower()
             city_key_lower = city_key.lower()
+            normalized_city = normalize_location_name(city_name_only)
+            city_root = get_name_root(city_name_only)
             
             # Проверяем точное совпадение с любым вариантом запроса
-            matches = False
+            matches_exact = False
             for variant in query_variants:
-                if variant == city_name_lower or variant == city_key_lower:
-                    matches = True
+                if (variant == city_name_lower or 
+                    variant == city_key_lower or 
+                    variant == normalized_city or
+                    variant == city_root):
+                    matches_exact = True
                     break
             
-            if matches:
+            # Проверяем частичное совпадение (по корню)
+            matches_partial = False
+            if query_root and city_root and query_root == city_root:
+                matches_partial = True
+            
+            if matches_exact or matches_partial:
                 # Фильтрация по стране, если указана
                 if country_lower:
                     city_country = city_data.get('country', '').lower().strip()
                     if city_country != country_lower:
                         continue
                 
-                # Нашли точное совпадение - возвращаем результат
-                result = city_data.copy()
-                result['location_name'] = city_name_only  # Используем название без страны
-                return {
-                    'success': True,
-                    'data': result
-                }
+                if matches_exact:
+                    exact_matches.append((city_key, city_data, city_name_only))
+                elif matches_partial:
+                    partial_matches.append((city_key, city_data, city_name_only))
+        
+        # Приоритет точным совпадениям
+        if exact_matches:
+            # Берем первый результат (обычно самый точный)
+            city_key, city_data, city_name_only = exact_matches[0]
+            result = city_data.copy()
+            result['location_name'] = city_name_only
+            return {
+                'success': True,
+                'data': result
+            }
+        
+        # Если точных совпадений нет, используем частичные
+        if partial_matches:
+            # Берем первый результат
+            city_key, city_data, city_name_only = partial_matches[0]
+            result = city_data.copy()
+            result['location_name'] = city_name_only
+            return {
+                'success': True,
+                'data': result
+            }
         
         # Если не найдено точное совпадение, возвращаем ошибку с предложениями
         suggestions = self.search_cities(location_name, country, limit=5)
@@ -214,6 +288,9 @@ class GeocodingService:
         query_lower = query.strip().lower()
         country_lower = country.lower().strip() if country else None
         results = []
+        
+        # Загружаем базу городов при необходимости (ленивая загрузка)
+        self._ensure_cities_db_loaded()
         
         # Проверяем, что база данных не пустая
         if not self.cities_db:

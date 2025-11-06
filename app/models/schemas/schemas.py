@@ -424,6 +424,12 @@ class UserProfileUpdate(BaseModel):
     birth_longitude: Optional[float] = Field(None, ge=-180, le=180, description="Долгота от -180 до +180")
     timezone_name: Optional[str] = None
     birth_time_utc_offset: Optional[float] = Field(None, ge=-12, le=14, description="UTC offset в часах для ручной корректировки (например, +3.0, -4.0, +3.5). Если указано, используется вместо автоматического определения по timezone_name")
+    # Поля для текущего местоположения
+    current_location_name: Optional[str] = Field(None, description="Название текущего города/места. Если указано, автоматически рассчитываются координаты и временная зона")
+    current_country: Optional[str] = Field(None, description="Текущая страна")
+    current_latitude: Optional[float] = Field(None, ge=-90, le=90, description="Текущая широта от -90 до +90")
+    current_longitude: Optional[float] = Field(None, ge=-180, le=180, description="Текущая долгота от -180 до +180")
+    current_timezone_name: Optional[str] = Field(None, description="Временная зона текущего места")
 
     @validator('birth_latitude')
     def validate_latitude(cls, v):
@@ -449,6 +455,22 @@ class UserProfileUpdate(BaseModel):
                 raise ValueError('UTC offset должен быть в диапазоне от -12 до +14 часов')
         return v
 
+    @validator('current_latitude')
+    def validate_current_latitude(cls, v):
+        """Валидация текущей широты"""
+        if v is not None:
+            if not (-90 <= v <= 90):
+                raise ValueError('Текущая широта должна быть в диапазоне от -90 до +90 градусов')
+        return v
+
+    @validator('current_longitude')
+    def validate_current_longitude(cls, v):
+        """Валидация текущей долготы"""
+        if v is not None:
+            if not (-180 <= v <= 180):
+                raise ValueError('Текущая долгота должна быть в диапазоне от -180 до +180 градусов')
+        return v
+
     class Config:
         json_schema_extra = {
             "example": {
@@ -459,7 +481,9 @@ class UserProfileUpdate(BaseModel):
                 "birth_latitude": 55.7558,
                 "birth_longitude": 37.6173,
                 "timezone_name": "Europe/Moscow",
-                "birth_time_utc_offset": 3.0
+                "birth_time_utc_offset": 3.0,
+                "current_location_name": "Санкт-Петербург",
+                "current_country": "Россия"
             }
         }
 

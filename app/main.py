@@ -124,11 +124,26 @@ def recreate_tables():
 # recreate_tables()
 
 # Или используй обычное создание если не хочешь терять данные
+# Оптимизация: проверяем существование таблиц перед созданием
 try:
-    Base.metadata.create_all(bind=engine)
-    logger.info("✅ Таблицы базы данных созданы/проверены")
+    from sqlalchemy import inspect
+    inspector = inspect(engine)
+    existing_tables = inspector.get_table_names()
+    
+    # Если таблицы уже существуют, пропускаем создание
+    if existing_tables:
+        logger.info(f"✅ Таблицы базы данных уже существуют ({len(existing_tables)} таблиц)")
+    else:
+        # Создаем таблицы только если их нет
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Таблицы базы данных созданы")
 except Exception as e:
-    logger.error(f"❌ Ошибка при создании таблиц: {str(e)}", exc_info=True)
+    # Если проверка не удалась, пытаемся создать таблицы (fallback)
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("✅ Таблицы базы данных созданы/проверены")
+    except Exception as e2:
+        logger.error(f"❌ Ошибка при создании таблиц: {str(e2)}", exc_info=True)
 
 # Глобальный обработчик исключений для отладки
 @app.exception_handler(Exception)

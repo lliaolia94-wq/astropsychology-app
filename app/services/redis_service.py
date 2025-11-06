@@ -26,32 +26,39 @@ class RedisService:
     """Сервис для работы с Redis"""
     
     def __init__(self):
-        """Инициализация Redis клиента"""
-        redis_host = os.getenv("REDIS_HOST", "localhost")
-        redis_port = int(os.getenv("REDIS_PORT", 6379))
-        redis_db = int(os.getenv("REDIS_DB", 0))
-        redis_password = os.getenv("REDIS_PASSWORD", None)
+        """Инициализация Redis клиента (ленивая загрузка)"""
+        # Сохраняем настройки для ленивой инициализации
+        self.redis_host = os.getenv("REDIS_HOST", "localhost")
+        self.redis_port = int(os.getenv("REDIS_PORT", 6379))
+        self.redis_db = int(os.getenv("REDIS_DB", 0))
+        self.redis_password = os.getenv("REDIS_PASSWORD", None)
+        
+        # Ленивая инициализация: клиент и очередь создаются только при использовании
+        self.redis_client = None
+        self.context_queue = None
+        self.use_sqlite_queue = None
+        self._redis_initialized = False
+    
+    def _ensure_redis_initialized(self):
+        """Обеспечивает инициализацию Redis клиента (ленивая загрузка)"""
+        if self._redis_initialized:
+            return
         
         try:
             self.redis_client = Redis(
-                host=redis_host,
-                port=redis_port,
-                db=redis_db,
-                password=redis_password,
+                host=self.redis_host,
+                port=self.redis_port,
+                db=self.redis_db,
+                password=self.redis_password,
                 decode_responses=True,
                 socket_connect_timeout=5,
                 socket_timeout=5
             )
             # Проверка подключения
             self.redis_client.ping()
-            logger.info(f"✅ Redis подключен: {redis_host}:{redis_port}")
-        except Exception as e:
-            logger.warning(f"⚠️ Redis недоступен: {str(e)}. Очереди задач и кеш будут недоступны.")
-            logger.warning("   Для запуска Redis: docker run -d -p 6379:6379 redis:latest")
-            self.redis_client = None
-        
-        # Инициализация очереди задач
-        if self.redis_client:
+            logger.info(f"✅ Redis подключен: {self.redis_host}:{self.redis_port}")
+            
+            # Инициализация очереди задач
             try:
                 from rq import Queue
                 self.context_queue = Queue('context_tasks', connection=self.redis_client)
@@ -61,12 +68,17 @@ class RedisService:
                 logger.warning(f"⚠️ Ошибка инициализации Redis очереди: {str(e)}")
                 self.context_queue = None
                 self.use_sqlite_queue = SQLITE_QUEUE_AVAILABLE
-        else:
+        except Exception as e:
+            logger.warning(f"⚠️ Redis недоступен: {str(e)}. Очереди задач и кеш будут недоступны.")
+            logger.warning("   Для запуска Redis: docker run -d -p 6379:6379 redis:latest")
+            self.redis_client = None
             self.context_queue = None
             # Используем SQLite queue как fallback
             self.use_sqlite_queue = SQLITE_QUEUE_AVAILABLE
             if self.use_sqlite_queue:
                 logger.info("✅ Используется SQLite-основанная очередь (бесплатная альтернатива Redis)")
+        
+        self._redis_initialized = True
     
     # ============ Кеширование ============
     
@@ -87,6 +99,9 @@ class RedisService:
         Returns:
             True при успехе, False при ошибке
         """
+        # Инициализируем Redis при необходимости (ленивая загрузка)
+        self._ensure_redis_initialized()
+        
         if not self.redis_client:
             return False
         
@@ -112,6 +127,9 @@ class RedisService:
         Returns:
             Значение или None
         """
+        # Инициализируем Redis при необходимости (ленивая загрузка)
+        self._ensure_redis_initialized()
+        
         if not self.redis_client:
             return None
         
@@ -159,6 +177,9 @@ class RedisService:
         Returns:
             Список ключей
         """
+        # Инициализируем Redis при необходимости (ленивая загрузка)
+        self._ensure_redis_initialized()
+        
         if not self.redis_client:
             return []
         
@@ -187,6 +208,9 @@ class RedisService:
         Returns:
             ID задачи (job_id) или None при ошибке
         """
+        # Инициализируем Redis при необходимости (ленивая загрузка)
+        self._ensure_redis_initialized()
+        
         # Используем Redis очередь если доступна
         if self.context_queue:
             try:
@@ -270,6 +294,9 @@ class RedisService:
         Returns:
             Количество задач
         """
+        # Инициализируем Redis при необходимости (ленивая загрузка)
+        self._ensure_redis_initialized()
+        
         # Redis очередь
         if self.context_queue:
             try:

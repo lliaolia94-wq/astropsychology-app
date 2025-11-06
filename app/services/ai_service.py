@@ -1,19 +1,113 @@
 import os
 import json
-import requests
+import httpx
+import asyncio
 import logging
+import threading
+from pathlib import Path
 from typing import Dict, List, Optional
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+# Функция для загрузки .env файла
+def load_env_file():
+    """Загружает .env файл из корня проекта"""
+    # Путь: app/services/ai_service.py -> app/services -> app -> корень проекта
+    project_root = Path(__file__).parent.parent.parent
+    env_file = project_root / ".env"
+    
+    # Также проверяем альтернативные пути на случай другой структуры
+    if not env_file.exists():
+        # Пробуем текущую рабочую директорию
+        env_file = Path.cwd() / ".env"
+        if not env_file.exists():
+            # Пробуем родительскую директорию
+            env_file = Path.cwd().parent / ".env"
+    
+    if env_file.exists():
+        load_dotenv(dotenv_path=env_file, override=True)
+        logger.info(f"✅ Загружен .env файл: {env_file}")
+        # Проверяем что ключ загружен
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if api_key:
+            logger.info(f"✅ DEEPSEEK_API_KEY найден: {api_key[:10]}...{api_key[-4:]} (длина: {len(api_key)})")
+        else:
+            logger.warning(f"⚠️ DEEPSEEK_API_KEY не найден в загруженном .env файле!")
+        return env_file
+    else:
+        # Если .env не найден, пробуем загрузить из текущей директории
+        load_dotenv(override=True)
+        logger.warning(f"⚠️ .env файл не найден в {env_file}, используется загрузка по умолчанию")
+        return None
+
+# Загружаем .env файл при импорте модуля
+env_file = load_env_file()
 
 
 class DeepSeekAIChatService:
+    """
+    Универсальный сервис для работы с AI API.
+    Поддерживает DeepSeek, Ollama (локально, бесплатно) и другие провайдеры.
+    Использует асинхронные запросы через httpx для лучшей производительности.
+    """
     def __init__(self):
-        self.api_key = os.getenv("DEEPSEEK_API_KEY")
-        self.api_url = os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions")
+        # ПЕРЕЗАГРУЖАЕМ .env файл при создании экземпляра для гарантии актуальности
+        load_env_file()
+        
+        # Определяем провайдера AI (по умолчанию: ollama для бесплатного использования)
+        self.provider = os.getenv("AI_PROVIDER", "ollama").lower()
+        
+        # Получаем ключ API (если нужен)
+        self.api_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+        
+        # Настройка URL и модели в зависимости от провайдера
+        if self.provider == "ollama":
+            # Ollama - локальная модель, полностью бесплатная
+            self.api_url = os.getenv("OLLAMA_API_URL", "http://localhost:11434/v1/chat/completions")
+            self.model = os.getenv("OLLAMA_MODEL", "llama3.2")  # или llama3.1, mistral, qwen2.5 и др.
+            self.api_key = None  # Ollama не требует API ключ
+            logger.info(f"🤖 Используется Ollama (бесплатная локальная модель)")
+            logger.info(f"   URL: {self.api_url}")
+            logger.info(f"   Модель: {self.model}")
+            logger.info(f"   💡 Для использования установите Ollama: https://ollama.com/")
+            logger.info(f"   💡 Затем запустите: ollama pull {self.model}")
+        elif self.provider == "deepseek":
+            # DeepSeek API (платный, требует баланс)
+            default_url = "https://api.deepseek.com/v1/chat/completions"
+            self.api_url = os.getenv("DEEPSEEK_API_URL", default_url)
+            self.model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+            
+            # Логируем информацию о ключе (безопасно, не показываем полный ключ)
+            if self.api_key:
+                logger.info(f"✅ DeepSeek API ключ найден: {self.api_key[:10]}...{self.api_key[-4:]} (длина: {len(self.api_key)})")
+                if not self.api_key.startswith("sk-"):
+                    logger.warning(f"⚠️ Ключ не начинается с 'sk-', возможно это не валидный ключ!")
+            else:
+                logger.error("❌ DeepSeek API ключ НЕ найден в переменных окружения!")
+                logger.error(f"   Проверьте файл .env в корне проекта")
+                logger.error(f"   💡 Для бесплатного использования установите AI_PROVIDER=ollama в .env")
+        else:
+            # Другие провайдеры (например, OpenAI совместимые)
+            self.api_url = os.getenv("AI_API_URL", "https://api.openai.com/v1/chat/completions")
+            self.model = os.getenv("AI_MODEL", "gpt-3.5-turbo")
+            if not self.api_key:
+                logger.warning(f"⚠️ API ключ не найден для провайдера {self.provider}")
+        
+        # Конфигурация для масштабируемости
+        self.max_retries = int(os.getenv("AI_MAX_RETRIES", "3"))
+        self.timeout = int(os.getenv("AI_TIMEOUT", "60"))
+        
+        # Создаем клиент httpx для переиспользования соединений
+        self._client: Optional[httpx.AsyncClient] = None
+        
+        logger.info(f"AI Service инициализирован. Провайдер: {self.provider}, Модель: {self.model}, URL: {self.api_url}")
+        
+        # Дополнительная проверка для отладки
+        if self.provider == "deepseek" and not self.api_key:
+            logger.warning("⚠️ ВНИМАНИЕ: DEEPSEEK_API_KEY не установлен!")
+            logger.warning(f"   Проверьте файл .env в корне проекта: {env_file}")
+            logger.warning(f"   💡 Для бесплатного использования установите AI_PROVIDER=ollama")
 
         # Библиотека шаблонов (как в ТЗ)
         self.templates = {
@@ -151,6 +245,21 @@ class DeepSeekAIChatService:
             }
         }
 
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Получение или создание асинхронного HTTP клиента"""
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout, connect=10.0),
+                limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
+            )
+        return self._client
+    
+    async def _close_client(self):
+        """Закрытие HTTP клиента"""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
     def build_system_prompt(self,
                             user_data: Dict,
                             template_type: Optional[str] = None,
@@ -217,29 +326,158 @@ class DeepSeekAIChatService:
 
         return base_prompt
 
+    async def _make_request_with_retry(self, payload: Dict, headers: Dict) -> Dict:
+        """
+        Выполнение запроса с retry механизмом для обработки временных ошибок
+        
+        Args:
+            payload: Тело запроса
+            headers: Заголовки запроса
+            
+        Returns:
+            Ответ от API в формате JSON
+            
+        Raises:
+            httpx.HTTPStatusError: При ошибках API (после всех попыток)
+            httpx.RequestError: При ошибках соединения (после всех попыток)
+        """
+        client = await self._get_client()
+        last_error = None
+        
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                logger.debug(f"Попытка {attempt}/{self.max_retries} запроса к DeepSeek API")
+                response = await client.post(
+                    self.api_url,
+                    headers=headers,
+                    json=payload
+                )
+                response.raise_for_status()
+                return response.json()
+                
+            except httpx.TimeoutException as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    wait_time = attempt * 2  # Экспоненциальная задержка
+                    logger.warning(f"Таймаут запроса (попытка {attempt}/{self.max_retries}). Повтор через {wait_time}с")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Таймаут после {self.max_retries} попыток")
+                    raise
+                    
+            except httpx.HTTPStatusError as e:
+                # Логируем детали ошибки для диагностики
+                error_details = {
+                    "status_code": e.response.status_code,
+                    "url": self.api_url,
+                    "model": self.model,
+                    "response_text": e.response.text[:500] if e.response.text else "Нет текста ответа"
+                }
+                logger.error(f"HTTP ошибка: {error_details}")
+                
+                # Для ошибок API (4xx, 5xx) не делаем retry, кроме 429 (rate limit) и 5xx
+                if e.response.status_code == 429:
+                    # Rate limit - делаем retry с задержкой
+                    if attempt < self.max_retries:
+                        wait_time = attempt * 5
+                        logger.warning(f"Rate limit (попытка {attempt}/{self.max_retries}). Повтор через {wait_time}с")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    raise
+                elif 500 <= e.response.status_code < 600:
+                    # Серверные ошибки - делаем retry
+                    last_error = e
+                    if attempt < self.max_retries:
+                        wait_time = attempt * 2
+                        logger.warning(f"Ошибка сервера {e.response.status_code} (попытка {attempt}/{self.max_retries}). Повтор через {wait_time}с")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    raise
+                elif e.response.status_code == 402:
+                    # 402 - недостаточно баланса на аккаунте
+                    error_text = e.response.text[:500] if e.response.text else "Нет деталей ошибки"
+                    logger.error(f"402 ошибка: Недостаточно баланса на аккаунте DeepSeek")
+                    logger.error(f"Ответ сервера: {error_text}")
+                    logger.error("💡 Решение:")
+                    logger.error("   1. Пополните баланс на https://platform.deepseek.com/")
+                    logger.error("   2. Проверьте лимиты использования API")
+                    raise
+                elif e.response.status_code == 404:
+                    # 404 - ошибка не найден ресурс (модель или endpoint)
+                    error_text = e.response.text[:500] if e.response.text else "Нет деталей ошибки"
+                    logger.error(f"404 ошибка: Ресурс не найден. URL: {self.api_url}, Модель: {self.model}")
+                    logger.error(f"Ответ сервера: {error_text}")
+                    logger.error("💡 Возможные причины:")
+                    logger.error("   1. Неверное имя модели (используйте: deepseek-chat или deepseek-reasoner)")
+                    logger.error("   2. Неверный URL endpoint (проверьте DEEPSEEK_API_URL в .env)")
+                    logger.error("   3. API ключ не имеет доступа к этой модели")
+                    raise
+                else:
+                    # Клиентские ошибки (4xx кроме 429 и 404) - не делаем retry
+                    logger.error(f"Ошибка API: {e.response.status_code} - {e.response.text}")
+                    raise
+                    
+            except httpx.RequestError as e:
+                # Ошибки соединения - делаем retry
+                last_error = e
+                if attempt < self.max_retries:
+                    wait_time = attempt * 2
+                    logger.warning(f"Ошибка соединения (попытка {attempt}/{self.max_retries}): {str(e)}. Повтор через {wait_time}с")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Ошибка соединения после {self.max_retries} попыток")
+                    raise
+                    
+            except Exception as e:
+                logger.error(f"Неожиданная ошибка при запросе к DeepSeek API: {str(e)}", exc_info=True)
+                raise
+        
+        # Если дошли сюда, значит все попытки исчерпаны
+        if last_error:
+            raise last_error
+        raise Exception("Неизвестная ошибка при выполнении запроса")
+
     async def generate_response(self,
                                 user_message: str,
                                 user_data: Dict,
                                 template_type: Optional[str] = None,
                                 context_entries: List[Dict] = None,
                                 mentioned_contacts: List[Dict] = None) -> str:
-        """Генерация ответа через DeepSeek API"""
-
+        """
+        Генерация ответа через DeepSeek API с использованием асинхронных запросов
+        
+        Args:
+            user_message: Сообщение пользователя
+            user_data: Данные пользователя (имя, знаки зодиака)
+            template_type: Тип шаблона для использования
+            context_entries: Релевантный контекст из истории
+            mentioned_contacts: Упомянутые контакты для синастрии
+            
+        Returns:
+            Ответ от ИИ
+        """
+        # ПЕРЕЗАГРУЖАЕМ ключ перед каждым запросом для гарантии актуальности
+        self.reload_api_key()
+        
         try:
-            if not self.api_key:
-                return "❌ Ошибка: API ключ DeepSeek не настроен. Пожалуйста, добавьте DEEPSEEK_API_KEY в файл .env"
+            # Проверяем наличие API ключа только для провайдеров, которые его требуют
+            if self.provider == "deepseek" and not self.api_key:
+                logger.error("API ключ DeepSeek не настроен")
+                return "❌ Ошибка: API ключ DeepSeek не настроен. Пожалуйста, добавьте DEEPSEEK_API_KEY в файл .env или используйте AI_PROVIDER=ollama для бесплатного варианта"
 
             system_prompt = self.build_system_prompt(
                 user_data, template_type, context_entries, mentioned_contacts
             )
 
             headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
+                "Content-Type": "application/json"
             }
+            # Добавляем авторизацию только если нужен API ключ
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
 
             payload = {
-                "model": "deepseek-chat",  # или "deepseek-coder" для программирования
+                "model": self.model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
@@ -249,17 +487,88 @@ class DeepSeekAIChatService:
                 "stream": False
             }
 
-            response = requests.post(self.api_url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
+            logger.info(f"Отправка запроса к AI API ({self.provider}). Модель: {self.model}, длина сообщения: {len(user_message)}")
+            
+            result = await self._make_request_with_retry(payload, headers)
+            
+            response_text = result["choices"][0]["message"]["content"]
+            logger.info(f"Получен ответ от AI API ({self.provider}). Длина ответа: {len(response_text)}")
+            
+            return response_text
 
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
-
-        except requests.exceptions.Timeout:
+        except httpx.TimeoutException:
+            logger.error(f"Таймаут при запросе к AI API ({self.provider})")
             return "⏰ Извините, время ожидания ответа истекло. Пожалуйста, попробуйте еще раз."
-        except requests.exceptions.RequestException as e:
-            return f"🔧 Ошибка соединения с DeepSeek API: {str(e)}"
+        except httpx.HTTPStatusError as e:
+            # ПЕРЕЗАГРУЖАЕМ ключ перед обработкой ошибки
+            self.reload_api_key()
+            
+            error_msg = f"Ошибка API ({self.provider}): {e.response.status_code}"
+            
+            # Специальная обработка ошибок
+            if e.response.status_code == 402:
+                error_text = e.response.text[:300] if e.response.text else "Нет деталей"
+                logger.error(f"402: Недостаточно баланса. URL: {self.api_url}, Модель: {self.model}")
+                logger.error(f"Ответ: {error_text}")
+                if self.provider == "deepseek":
+                    error_msg = f"Ошибка 402: Недостаточно баланса на аккаунте DeepSeek. " \
+                               f"Пополните баланс на https://platform.deepseek.com/ или используйте AI_PROVIDER=ollama для бесплатного варианта"
+                else:
+                    error_msg = f"Ошибка 402: Недостаточно баланса. Пополните баланс аккаунта."
+            
+            elif e.response.status_code == 404:
+                error_text = e.response.text[:300] if e.response.text else "Нет деталей"
+                logger.error(f"404: Ресурс не найден. URL: {self.api_url}, Модель: {self.model}")
+                logger.error(f"Ответ: {error_text}")
+                if self.provider == "ollama":
+                    error_msg = f"Ошибка 404: Модель {self.model} не найдена в Ollama. " \
+                               f"Загрузите модель: ollama pull {self.model}. " \
+                               f"Проверьте, что Ollama запущена: ollama serve"
+                elif self.provider == "deepseek":
+                    error_msg = f"Ошибка 404: Ресурс не найден. Проверьте имя модели ({self.model}) и URL endpoint. " \
+                               f"Используйте: deepseek-chat или deepseek-reasoner"
+                else:
+                    error_msg = f"Ошибка 404: Ресурс не найден. Проверьте имя модели ({self.model}) и URL endpoint."
+            
+            elif e.response.status_code == 401:
+                # Логируем информацию о ключе для отладки (безопасно)
+                key_info = f"{self.api_key[:10]}...{self.api_key[-4:]}" if self.api_key else "НЕ УСТАНОВЛЕН"
+                env_file_path = Path(__file__).parent.parent.parent / ".env"
+                
+                # Читаем реальное содержимое .env файла для диагностики
+                actual_key_from_file = None
+                if env_file_path.exists():
+                    try:
+                        with open(env_file_path, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                if line.strip().startswith('DEEPSEEK_API_KEY='):
+                                    actual_key_from_file = line.split('=', 1)[1].strip()
+                                    break
+                    except Exception as read_err:
+                        logger.error(f"Ошибка чтения .env файла: {read_err}")
+                
+                logger.error(f"Ошибка авторизации (401). Используемый ключ: {key_info}")
+                logger.error(f"Проверьте файл .env: {env_file_path}")
+                if actual_key_from_file:
+                    file_key_info = f"{actual_key_from_file[:10]}...{actual_key_from_file[-4:]}" if len(actual_key_from_file) > 4 else actual_key_from_file
+                    logger.error(f"В .env файле реально: {file_key_info}")
+                    if 'your' in actual_key_from_file.lower() or 'placeholder' in actual_key_from_file.lower():
+                        logger.error("⚠️⚠️⚠️ В .env файле стоит ЗАГЛУШКА! Замените 'your_deeps...here' на реальный ключ sk-888019144c984d878303305ae31095a9")
+                
+                error_msg = f"Ошибка авторизации. Проверьте API ключ. (Используется ключ: {key_info})"
+            elif e.response.status_code == 429:
+                error_msg = "Превышен лимит запросов. Пожалуйста, подождите немного."
+            elif e.response.status_code >= 500:
+                error_msg = "Временная ошибка сервера DeepSeek. Пожалуйста, попробуйте позже."
+            logger.error(f"{error_msg} - {e.response.text}")
+            return f"🔧 {error_msg}"
+        except httpx.RequestError as e:
+            logger.error(f"Ошибка соединения с AI API ({self.provider}): {str(e)}")
+            if self.provider == "ollama":
+                return f"🔧 Ошибка соединения с Ollama. Убедитесь, что Ollama запущена: ollama serve. Проверьте URL: {self.api_url}"
+            return f"🔧 Ошибка соединения с AI API. Проверьте интернет-соединение и попробуйте еще раз."
         except Exception as e:
+            logger.error(f"Неожиданная ошибка при генерации ответа: {str(e)}", exc_info=True)
             return f"❌ Произошла непредвиденная ошибка: {str(e)}"
 
     def get_available_templates(self) -> List[Dict]:
@@ -274,9 +583,9 @@ class DeepSeekAIChatService:
             for template_id, template_data in self.templates.items()
         ]
     
-    def chat(self, message: str, system_prompt: Optional[str] = None) -> str:
+    async def chat(self, message: str, system_prompt: Optional[str] = None) -> str:
         """
-        Синхронный метод для простых чат-запросов (без контекста пользователя)
+        Асинхронный метод для простых чат-запросов (без контекста пользователя)
         
         Args:
             message: Сообщение пользователя
@@ -286,7 +595,9 @@ class DeepSeekAIChatService:
             Ответ ИИ
         """
         try:
-            if not self.api_key:
+            # Проверяем наличие API ключа только для провайдеров, которые его требуют
+            if self.provider == "deepseek" and not self.api_key:
+                logger.error("API ключ DeepSeek не настроен")
                 return "❌ Ошибка: API ключ DeepSeek не настроен"
             
             messages = []
@@ -295,26 +606,92 @@ class DeepSeekAIChatService:
             messages.append({"role": "user", "content": message})
             
             headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
+                "Content-Type": "application/json"
             }
+            # Добавляем авторизацию только если нужен API ключ
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
             
             payload = {
-                "model": "deepseek-chat",
+                "model": self.model,
                 "messages": messages,
                 "temperature": 0.7,
                 "max_tokens": 1000,
                 "stream": False
             }
             
-            response = requests.post(self.api_url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            
-            result = response.json()
+            result = await self._make_request_with_retry(payload, headers)
             return result["choices"][0]["message"]["content"]
+            
+        except httpx.TimeoutException:
+            logger.error("Таймаут в chat методе")
+            return "⏰ Извините, время ожидания ответа истекло."
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Ошибка API в chat методе: {e.response.status_code}")
+            return f"🔧 Ошибка API: {e.response.status_code}"
         except Exception as e:
-            logger.error(f"Ошибка в chat методе: {str(e)}")
+            logger.error(f"Ошибка в chat методе: {str(e)}", exc_info=True)
             return f"Ошибка: {str(e)}"
+
+
+    def chat_sync(self, message: str, system_prompt: Optional[str] = None) -> str:
+        """
+        Синхронная обертка для chat метода.
+        Безопасно вызывает асинхронный код даже если event loop уже запущен.
+        
+        Args:
+            message: Сообщение пользователя
+            system_prompt: Опциональный системный промпт
+            
+        Returns:
+            Ответ ИИ
+        """
+        try:
+            # Проверяем, есть ли уже запущенный event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # Если event loop уже запущен, используем новый поток с новым event loop
+                
+                result = None
+                exception = None
+                
+                def run_in_thread():
+                    nonlocal result, exception
+                    try:
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        result = new_loop.run_until_complete(self.chat(message, system_prompt))
+                        new_loop.close()
+                    except Exception as e:
+                        exception = e
+                
+                thread = threading.Thread(target=run_in_thread)
+                thread.start()
+                thread.join()
+                
+                if exception:
+                    raise exception
+                return result
+            except RuntimeError:
+                # Event loop не запущен, можно использовать asyncio.run
+                return asyncio.run(self.chat(message, system_prompt))
+        except Exception as e:
+            logger.error(f"Ошибка в chat_sync методе: {str(e)}", exc_info=True)
+            return f"Ошибка: {str(e)}"
+
+
+    def reload_api_key(self):
+        """Перезагружает API ключ из .env файла"""
+        load_env_file()
+        if self.provider == "deepseek":
+            new_key = os.getenv("DEEPSEEK_API_KEY")
+        else:
+            new_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("OPENAI_API_KEY")
+        
+        if new_key != self.api_key:
+            logger.info(f"🔄 API ключ перезагружен: {new_key[:10]}...{new_key[-4:] if new_key else 'НЕТ'}")
+            self.api_key = new_key
+        return self.api_key
 
 
 # Глобальный экземпляр сервиса

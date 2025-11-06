@@ -60,13 +60,37 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: int, db: Session = De
 
     mentioned_contacts = []
     if chat_request.mentioned_contacts:
+        # Получаем все контакты пользователя для поиска по aliases
+        # Используем Python-фильтрацию, так как JSON поиск сложен в разных БД
+        all_contacts = db.scalars(
+            select(Contact).where(Contact.user_id == user_id)
+        ).all()
+        
         for alias in chat_request.mentioned_contacts:
-            contact = db.scalar(
-                select(Contact).where(
-                    (Contact.user_id == user_id) &
-                    (Contact.aliases.contains([alias]))
-                )
-            )
+            alias_lower = alias.lower()
+            contact = None
+            
+            # Ищем контакт по aliases (массив строк в JSON), имени, relationship_type и custom_title
+            for cont in all_contacts:
+                found = False
+                
+                # Проверяем aliases (массив строк в JSON)
+                if cont.aliases:
+                    aliases_list = cont.aliases if isinstance(cont.aliases, list) else []
+                    if any(alias_lower in str(a).lower() for a in aliases_list):
+                        found = True
+                
+                # Проверяем имя, relationship_type и custom_title
+                if not found:
+                    if (cont.name and alias_lower in cont.name.lower()) or \
+                       (cont.relationship_type and alias_lower in cont.relationship_type.lower()) or \
+                       (cont.custom_title and alias_lower in cont.custom_title.lower()):
+                        found = True
+                
+                if found:
+                    contact = cont
+                    break
+            
             if contact:
                 contact_chart = astro_service.calculate_natal_chart(
                     contact.birth_date,
