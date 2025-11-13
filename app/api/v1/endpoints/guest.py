@@ -12,7 +12,7 @@ from app.services.geocoding_service import geocoding_service
 from app.services.ai_service import ai_service
 
 
-router = APIRouter(tags=["Guest"], prefix="/api/guest")
+router = APIRouter(tags=["Астрологические метрики"], prefix="/api/guest")
 
 
 class GuestChartRequest(BaseModel):

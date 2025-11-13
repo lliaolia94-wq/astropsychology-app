@@ -10,7 +10,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.services.natal_chart_service import natal_chart_service
 from app.services.geocoding_service import geocoding_service
 
-router = APIRouter(tags=["Users"])
+router = APIRouter(tags=["Пользователь"])
 
 
 @router.put("/users/me", response_model=UserResponse, summary="Обновить профиль текущего пользователя")

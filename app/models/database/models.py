@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON, DECIMAL, Date, Time
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, JSON, DECIMAL, Date, Time, Boolean, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.core.database import Base
@@ -197,3 +197,229 @@ class SMSCode(Base):
     expires_at = Column(DateTime, nullable=False)
     attempts = Column(Integer, default=0)  # Количество попыток ввода
     used = Column(Integer, default=0)  # 0 = не использован, 1 = использован
+
+
+# ============ РЕГИСТРЫ КОНТЕКСТНОЙ ИНФОРМАЦИИ ============
+
+class EventsRegister(Base):
+    """
+    Основной регистр событий пользователя
+    Централизованное хранение всех значимых событий с временными метками, классификацией и контекстом
+    """
+    __tablename__ = "events_register"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)  # для группировки событий одной сессии
+    
+    # Временные метки
+    event_date = Column(DateTime, nullable=False, index=True)  # дата события
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    effective_from = Column(DateTime, nullable=False)  # начало периода актуальности
+    effective_to = Column(DateTime, nullable=True)  # конец периода актуальности (NULL = бессрочно)
+    
+    # Классификация
+    event_type = Column(String(50), nullable=False, index=True)  # 'user_message', 'ai_response', 'life_event', 'astrology_calculation'
+    category = Column(String(50), nullable=False, index=True)  # career, health, relationships, finance, spiritual
+    priority = Column(Integer, default=3)  # 1-5, где 5 - максимальная важность
+    
+    # Содержимое
+    title = Column(String(500), nullable=True)
+    description = Column(Text, nullable=True)
+    user_message = Column(Text, nullable=True)
+    ai_response = Column(Text, nullable=True)
+    insight_text = Column(Text, nullable=True)
+    
+    # Эмоциональный контекст
+    emotional_state = Column(String(50), nullable=True, index=True)  # состояние эмоций
+    emotional_intensity = Column(DECIMAL(3, 2), nullable=True)  # интенсивность 0-1
+    emotional_trigger = Column(String(200), nullable=True)  # триггер эмоции
+    
+    # Астрологический контекст
+    astrological_context = Column(JSONB if USE_JSONB else JSON, nullable=True)  # транзиты, аспекты на момент события
+    natal_chart_snapshot_id = Column(Integer, ForeignKey("natal_charts_natalchart.id"), nullable=True)  # снимок натальной карты
+    
+    # Метаданные
+    tags = Column(JSON, nullable=True)  # массив тегов ['работа', 'конфликт', 'решение']
+    source = Column(String(100), nullable=True)  # 'user_input', 'system_generated', 'astrology_calc'
+    confidence_score = Column(DECIMAL(3, 2), default=1.0)  # оценка достоверности 0-1
+    
+    # Ссылки на связанные сущности
+    contact_ids = Column(JSON, nullable=True)  # массив ID контактов
+    location_id = Column(Integer, nullable=True)  # ID локации (для будущего расширения)
+    business_context_id = Column(Integer, nullable=True)  # ID бизнес-контекста (для будущего расширения)
+    
+    # Relationships
+    user = relationship("User")
+    session = relationship("ChatSession")
+    natal_chart_snapshot = relationship("NatalChart")
+    
+    # Индексы создаются через миграцию
+
+
+class ContactsRegister(Base):
+    """
+    Регистр контактов пользователя
+    Хранение информации о значимых людях с расчетными астрологическими данными и динамикой отношений
+    """
+    __tablename__ = "contacts_register"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    
+    # Основная информация
+    name = Column(String(200), nullable=False)
+    relationship_type = Column(String(50), nullable=False, index=True)  # family, friend, colleague, business, romantic
+    relationship_depth = Column(Integer, nullable=True)  # 1-10, где 1=поверхностный, 10=глубокий
+    
+    # Астрологические данные
+    birth_date = Column(Date, nullable=True)
+    birth_time = Column(Time, nullable=True)
+    birth_place = Column(String(300), nullable=True)
+    timezone = Column(String(50), nullable=True)
+    
+    # Рассчитанные данные
+    natal_chart_data = Column(JSONB if USE_JSONB else JSON, nullable=True)  # данные натальной карты контакта
+    synastry_with_user = Column(JSONB if USE_JSONB else JSON, nullable=True)  # синастрия с пользователем
+    composite_chart = Column(JSONB if USE_JSONB else JSON, nullable=True)  # композитная карта
+    
+    # Динамика отношений
+    interaction_frequency = Column(String(20), nullable=True)  # 'daily', 'weekly', 'monthly', 'rarely'
+    last_interaction_date = Column(DateTime, nullable=True)
+    emotional_pattern = Column(JSONB if USE_JSONB else JSON, nullable=True)  # паттерны эмоционального взаимодействия
+    
+    # Метаданные
+    tags = Column(JSON, nullable=True)  # массив тегов ['бизнес', 'конфликтный', 'поддерживающий']
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    privacy_level = Column(String(20), default='private', nullable=False)  # 'public', 'private', 'hidden'
+    
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Relationships
+    user = relationship("User")
+
+
+class TransitsRegister(Base):
+    """
+    Регистр транзитов
+    Хранение предварительно рассчитанных астрологических транзитов с периодами действия и интерпретациями
+    """
+    __tablename__ = "transits_register"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    
+    # Период действия
+    calculation_date = Column(Date, nullable=False)  # дата расчета
+    start_date = Column(Date, nullable=False, index=True)  # начало периода транзита
+    end_date = Column(Date, nullable=False, index=True)  # конец периода транзита
+    transit_date = Column(Date, nullable=False, index=True)  # конкретная дата транзита (для индексации)
+    
+    # Астрологические данные
+    transit_type = Column(String(50), nullable=False, index=True)  # 'planet_transit', 'lunar_phase', 'eclipse', 'retrograde'
+    planet_from = Column(String(20), nullable=False, index=True)  # транзитирующая планета
+    planet_to = Column(String(20), nullable=True, index=True)  # планета/точка в натальной карте
+    aspect_type = Column(String(20), nullable=True)  # 'conjunction', 'square', 'trine'
+    exact_time = Column(DateTime, nullable=True)  # точное время аспекта
+    
+    # Астрологические параметры
+    orb = Column(DECIMAL(4, 2), nullable=True)  # орбис
+    strength = Column(DECIMAL(3, 2), nullable=True)  # сила аспекта 0-1
+    house = Column(Integer, nullable=True)  # дом в натальной карте (1-12)
+    
+    # Интерпретация
+    interpretation = Column(Text, nullable=True)  # текст интерпретации
+    impact_level = Column(String(20), nullable=False, index=True)  # 'low', 'medium', 'high', 'critical'
+    impact_areas = Column(JSON, nullable=True)  # области влияния: ['career', 'health', 'relationships']
+    
+    # Связи
+    related_transit_ids = Column(JSON, nullable=True)  # связанные транзиты
+    triggered_event_ids = Column(JSON, nullable=True)  # события, вызванные этим транзитом
+    
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Relationships
+    user = relationship("User")
+
+
+class VirtualSlices(Base):
+    """
+    Регистр виртуальных срезов
+    Кэширование часто используемых запросов для ускорения работы системы
+    """
+    __tablename__ = "virtual_slices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    slice_name = Column(String(100), nullable=False)
+    
+    # Параметры среза
+    slice_type = Column(String(50), nullable=False, index=True)  # 'temporal', 'thematic', 'emotional', 'astrological'
+    date_from = Column(DateTime, nullable=True, index=True)
+    date_to = Column(DateTime, nullable=True, index=True)
+    filters = Column(JSONB if USE_JSONB else JSON, nullable=False)  # условия фильтрации в JSON
+    
+    # Результаты среза (кэш)
+    included_event_ids = Column(JSON, nullable=True)  # массив ID событий
+    included_contact_ids = Column(JSON, nullable=True)  # массив ID контактов
+    included_transit_ids = Column(JSON, nullable=True)  # массив ID транзитов
+    
+    # Статистика среза
+    events_count = Column(Integer, default=0, nullable=False)
+    patterns_detected = Column(JSONB if USE_JSONB else JSON, nullable=True)  # выявленные паттерны
+    summary_statistics = Column(JSONB if USE_JSONB else JSON, nullable=True)  # статистика по срезу
+    
+    # Метаданные
+    is_cached = Column(Boolean, default=False, nullable=False)
+    cache_ttl_hours = Column(Integer, default=24, nullable=False)
+    last_accessed = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Relationships
+    user = relationship("User")
+
+
+class KarmicThemesRegister(Base):
+    """
+    Регистр кармических тем
+    Выявление и отслеживание сквозных кармических паттернов пользователя
+    """
+    __tablename__ = "karmic_themes_register"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    
+    # Идентификация темы
+    theme_name = Column(String(100), nullable=False)
+    theme_type = Column(String(50), nullable=False, index=True)  # 'natal', 'transits', 'life_events', 'relationships'
+    description = Column(Text, nullable=True)
+    
+    # Астрологические индикаторы
+    natal_indicators = Column(JSONB if USE_JSONB else JSON, nullable=True)  # планеты в 12 доме, узлы и т.д.
+    transit_indicators = Column(JSONB if USE_JSONB else JSON, nullable=True)  # транзиты, активирующие тему
+    
+    # Проявление в жизни
+    manifestation_level = Column(DECIMAL(3, 2), nullable=True)  # уровень проявления 0-1
+    first_manifested_date = Column(DateTime, nullable=True)
+    last_manifested_date = Column(DateTime, nullable=True)
+    manifestation_count = Column(Integer, default=0, nullable=False)
+    
+    # Связанные события и контакты
+    related_event_ids = Column(JSON, nullable=True)  # массив ID событий
+    related_contact_ids = Column(JSON, nullable=True)  # массив ID контактов
+    triggering_transit_ids = Column(JSON, nullable=True)  # массив ID транзитов
+    
+    # Статус и приоритет
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    resolution_status = Column(String(20), default='unresolved', nullable=False, index=True)  # 'unresolved', 'in_progress', 'resolved'
+    priority = Column(Integer, nullable=True)  # 1-5
+    
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Relationships
+    user = relationship("User")

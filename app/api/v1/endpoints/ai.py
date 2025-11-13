@@ -5,7 +5,7 @@ from typing import List
 from datetime import datetime, timezone
 
 from app.core.database import get_db
-from app.models.database.models import User, ChatSession, ChatMessage, Contact
+from app.models.database.models import User, ChatSession, ChatMessage, ContactsRegister
 from app.models.schemas.schemas import (
     ChatRequest, ChatResponse, ChatSessionResponse, TemplateInfo
 )
@@ -15,7 +15,7 @@ from app.services.astro_service import astro_service
 from app.services.redis_service import redis_service
 from app.workers.context_worker import process_context_save_task
 
-router = APIRouter(tags=["AI"], prefix="/ai")
+router = APIRouter(tags=["ИИ и контекст"], prefix="/ai")
 
 
 @router.get("/templates", response_model=List[TemplateInfo], summary="Доступные шаблоны ИИ")
@@ -60,41 +60,44 @@ async def chat_with_ai(chat_request: ChatRequest, user_id: int, db: Session = De
 
     mentioned_contacts = []
     if chat_request.mentioned_contacts:
-        # Получаем все контакты пользователя для поиска по aliases
-        # Используем Python-фильтрацию, так как JSON поиск сложен в разных БД
-        all_contacts = db.scalars(
-            select(Contact).where(Contact.user_id == user_id)
+        # Получаем все контакты пользователя из регистра для поиска по тегам/имени
+        all_contacts = db.query(ContactsRegister).filter(
+            ContactsRegister.user_id == user_id,
+            ContactsRegister.is_active == True
         ).all()
         
         for alias in chat_request.mentioned_contacts:
             alias_lower = alias.lower()
             contact = None
             
-            # Ищем контакт по aliases (массив строк в JSON), имени, relationship_type и custom_title
+            # Ищем контакт по тегам, имени, relationship_type
             for cont in all_contacts:
                 found = False
                 
-                # Проверяем aliases (массив строк в JSON)
-                if cont.aliases:
-                    aliases_list = cont.aliases if isinstance(cont.aliases, list) else []
-                    if any(alias_lower in str(a).lower() for a in aliases_list):
+                # Проверяем теги (массив строк в JSON)
+                if cont.tags:
+                    tags_list = cont.tags if isinstance(cont.tags, list) else []
+                    if any(alias_lower in str(t).lower() for t in tags_list):
                         found = True
                 
-                # Проверяем имя, relationship_type и custom_title
+                # Проверяем имя и relationship_type
                 if not found:
                     if (cont.name and alias_lower in cont.name.lower()) or \
-                       (cont.relationship_type and alias_lower in cont.relationship_type.lower()) or \
-                       (cont.custom_title and alias_lower in cont.custom_title.lower()):
+                       (cont.relationship_type and alias_lower in cont.relationship_type.lower()):
                         found = True
                 
                 if found:
                     contact = cont
                     break
             
-            if contact:
+            if contact and contact.birth_date and contact.birth_time and contact.birth_place:
+                # Форматируем дату и время для расчета карты
+                birth_date_str = contact.birth_date.strftime("%Y-%m-%d")
+                birth_time_str = contact.birth_time.strftime("%H:%M")
+                
                 contact_chart = astro_service.calculate_natal_chart(
-                    contact.birth_date,
-                    contact.birth_time,
+                    birth_date_str,
+                    birth_time_str,
                     contact.birth_place
                 )
 

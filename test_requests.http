@@ -15,11 +15,11 @@ GET http://localhost:8000/users
 ### Расчет полноценной натальной карты
 POST http://localhost:8000/api/calculate-full-chart/1
 
-### Получение профессионального календаря
-GET http://localhost:8000/api/professional-calendar/1/2024/12
+### Получение профессионального календаря (из регистра)
+GET http://localhost:8000/registers/transits/calendar/1/2024/12
 
-### Получение детальных транзитов на день
-GET http://localhost:8000/api/daily-transits/1/2024-12-15
+### Получение детальных транзитов на день (из регистра)
+GET http://localhost:8000/registers/transits/daily/1/2024-12-15
 
 ### === КОНТАКТЫ ===
 

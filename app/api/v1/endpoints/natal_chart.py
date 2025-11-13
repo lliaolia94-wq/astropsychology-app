@@ -18,7 +18,7 @@ from app.models.schemas.schemas import (
 from app.services.natal_chart_service import natal_chart_service
 from app.api.v1.endpoints.auth import get_current_user
 
-router = APIRouter(tags=["Natal Charts"], prefix="/api/natal-chart")
+router = APIRouter(tags=["Астрологические метрики"], prefix="/api/natal-chart")
 
 
 @router.post(

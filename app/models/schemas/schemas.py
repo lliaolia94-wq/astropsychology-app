@@ -648,3 +648,169 @@ class NatalChartRecalculateRequest(BaseModel):
                 "houses_system": "placidus"
             }
         }
+
+
+# ============ РЕГИСТРЫ КОНТЕКСТНОЙ ИНФОРМАЦИИ ============
+
+class EventCreate(BaseModel):
+    """Создание события"""
+    event_type: str = Field(..., description="Тип события: user_message, ai_response, life_event, astrology_calculation")
+    category: str = Field(..., description="Категория: career, health, relationships, finance, spiritual")
+    event_date: datetime = Field(..., description="Дата события")
+    effective_from: datetime = Field(..., description="Начало периода актуальности")
+    effective_to: Optional[datetime] = Field(None, description="Конец периода актуальности (None = бессрочно)")
+    title: Optional[str] = None
+    description: Optional[str] = None
+    user_message: Optional[str] = None
+    ai_response: Optional[str] = None
+    insight_text: Optional[str] = None
+    emotional_state: Optional[str] = None
+    emotional_intensity: Optional[float] = Field(None, ge=0, le=1)
+    emotional_trigger: Optional[str] = None
+    tags: Optional[List[str]] = None
+    priority: Optional[int] = Field(3, ge=1, le=5)
+    session_id: Optional[int] = None
+    contact_ids: Optional[List[int]] = None
+
+
+class EventUpdate(BaseModel):
+    """Обновление события"""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    emotional_state: Optional[str] = None
+    emotional_intensity: Optional[float] = Field(None, ge=0, le=1)
+    tags: Optional[List[str]] = None
+    priority: Optional[int] = Field(None, ge=1, le=5)
+    effective_to: Optional[datetime] = None
+
+
+class EventResponse(BaseModel):
+    """Ответ с событием"""
+    id: int
+    user_id: int
+    session_id: Optional[int] = None
+    event_date: str
+    created_at: str
+    effective_from: str
+    effective_to: Optional[str] = None
+    event_type: str
+    category: str
+    priority: int
+    title: Optional[str] = None
+    description: Optional[str] = None
+    user_message: Optional[str] = None
+    ai_response: Optional[str] = None
+    insight_text: Optional[str] = None
+    emotional_state: Optional[str] = None
+    emotional_intensity: Optional[float] = None
+    emotional_trigger: Optional[str] = None
+    tags: Optional[List[str]] = None
+    source: Optional[str] = None
+    confidence_score: Optional[float] = None
+    contact_ids: Optional[List[int]] = None
+
+
+class ContactRegisterCreate(BaseModel):
+    """Создание контакта в регистре"""
+    name: str
+    relationship_type: str = Field(..., description="family, friend, colleague, business, romantic")
+    relationship_depth: Optional[int] = Field(None, ge=1, le=10)
+    birth_date: Optional[str] = None
+    birth_time: Optional[str] = None
+    birth_place: Optional[str] = None
+    timezone: Optional[str] = None
+    interaction_frequency: Optional[str] = None
+    tags: Optional[List[str]] = None
+    privacy_level: Optional[str] = Field("private", description="public, private, hidden")
+
+
+class ContactRegisterUpdate(BaseModel):
+    """Обновление контакта"""
+    name: Optional[str] = None
+    relationship_type: Optional[str] = None
+    relationship_depth: Optional[int] = Field(None, ge=1, le=10)
+    interaction_frequency: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+class ContactRegisterResponse(BaseModel):
+    """Ответ с контактом"""
+    id: int
+    user_id: int
+    name: str
+    relationship_type: str
+    relationship_depth: Optional[int] = None
+    birth_date: Optional[str] = None
+    birth_time: Optional[str] = None
+    birth_place: Optional[str] = None
+    timezone: Optional[str] = None
+    interaction_frequency: Optional[str] = None
+    last_interaction_date: Optional[str] = None
+    tags: Optional[List[str]] = None
+    is_active: bool
+    privacy_level: str
+
+
+class TransitCreate(BaseModel):
+    """Создание транзита"""
+    transit_type: str = Field(..., description="planet_transit, lunar_phase, eclipse, retrograde")
+    planet_from: str
+    planet_to: Optional[str] = None
+    start_date: str = Field(..., description="YYYY-MM-DD")
+    end_date: str = Field(..., description="YYYY-MM-DD")
+    transit_date: str = Field(..., description="YYYY-MM-DD")
+    aspect_type: Optional[str] = None
+    exact_time: Optional[datetime] = None
+    orb: Optional[float] = None
+    strength: Optional[float] = Field(None, ge=0, le=1)
+    house: Optional[int] = Field(None, ge=1, le=12)
+    interpretation: Optional[str] = None
+    impact_level: str = Field(..., description="low, medium, high, critical")
+    impact_areas: Optional[List[str]] = None
+
+
+class TransitResponse(BaseModel):
+    """Ответ с транзитом"""
+    id: int
+    user_id: int
+    calculation_date: str
+    start_date: str
+    end_date: str
+    transit_date: str
+    transit_type: str
+    planet_from: str
+    planet_to: Optional[str] = None
+    aspect_type: Optional[str] = None
+    exact_time: Optional[str] = None
+    orb: Optional[float] = None
+    strength: Optional[float] = None
+    house: Optional[int] = None
+    interpretation: Optional[str] = None
+    impact_level: str
+    impact_areas: Optional[List[str]] = None
+
+
+class ContextQueryRequest(BaseModel):
+    """Запрос на получение контекстного среза"""
+    days: Optional[int] = Field(None, description="Количество дней назад")
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    categories: Optional[List[str]] = None
+    emotional_states: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    min_priority: Optional[int] = Field(None, ge=1, le=5)
+    max_priority: Optional[int] = Field(None, ge=1, le=5)
+    include_contacts: bool = False
+    include_transits: bool = False
+    include_karmic_themes: bool = False
+    limit: Optional[int] = Field(None, ge=1, le=1000)
+
+
+class ContextSliceResponse(BaseModel):
+    """Ответ с контекстным срезом"""
+    events: List[EventResponse]
+    contacts: Optional[List[ContactRegisterResponse]] = None
+    transits: Optional[List[TransitResponse]] = None
+    statistics: Dict[str, Any]
+    patterns: List[Dict[str, Any]]

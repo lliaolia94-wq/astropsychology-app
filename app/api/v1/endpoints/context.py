@@ -24,7 +24,7 @@ from app.services.context_service import context_service
 from app.services.redis_service import redis_service
 from app.workers.context_worker import process_context_save_task, save_context_sync
 
-router = APIRouter(prefix="/api/v1/context", tags=["Context"])
+router = APIRouter(prefix="/api/v1/context", tags=["ИИ и контекст"])
 
 
 # ============ Управление сессиями ============

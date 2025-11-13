@@ -7,6 +7,7 @@ from .ai import router as ai_router
 from .context import router as context_router
 from .natal_chart import router as natal_chart_router
 from .general import router as general_router
+from .registers import router as registers_router
 
 try:
     from .geocoding import router as geocoding_router
@@ -26,6 +27,7 @@ __all__ = [
     "ai_router",
     "context_router",
     "natal_chart_router",
+    "registers_router",
     "geocoding_router",
     "guest_router",
     "general_router",

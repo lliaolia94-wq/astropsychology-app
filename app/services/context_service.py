@@ -9,10 +9,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 
-from app.models.database.models import ChatSession, ContextEntry, ChatMessage
+from app.models.database.models import ChatSession, ContextEntry, ChatMessage, User, NatalChart, PlanetPosition, HouseCuspid
 from app.services.vector_service import vector_service
 from app.services.redis_service import redis_service
 from app.services.ai_service import DeepSeekAIChatService
+from app.services.context_selection import ContextIntegrator, ContextSelectionRequest
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,8 @@ class ContextService:
     
     def __init__(self):
         self.ai_service = DeepSeekAIChatService()
+        self.context_integrator = ContextIntegrator()
+        self.use_intelligent_selection = True  # Флаг для использования интеллектуального отбора
     
     # ============ Управление сессиями ============
     
@@ -283,10 +286,189 @@ class ContextService:
         session_id: int,
         user_id: int,
         current_message: Optional[str] = None,
-        limit: int = 10
+        limit: int = 10,
+        use_intelligent_selection: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
         """
         Получение релевантного контекста для промпта
+        
+        Использует интеллектуальный отбор контекста (если включен) или старый метод.
+        
+        Args:
+            db: Сессия БД
+            session_id: ID текущей сессии
+            user_id: ID пользователя
+            current_message: Текущее сообщение (для семантического поиска)
+            limit: Максимальное количество записей
+            use_intelligent_selection: Использовать интеллектуальный отбор (None = использовать настройку по умолчанию)
+            
+        Returns:
+            Список релевантных контекстных записей
+        """
+        # Определяем, использовать ли интеллектуальный отбор
+        if use_intelligent_selection is None:
+            use_intelligent_selection = self.use_intelligent_selection
+        
+        if use_intelligent_selection:
+            return self._get_relevant_context_intelligent(
+                db=db,
+                session_id=session_id,
+                user_id=user_id,
+                current_message=current_message,
+                limit=limit
+            )
+        else:
+            return self._get_relevant_context_legacy(
+                db=db,
+                session_id=session_id,
+                user_id=user_id,
+                current_message=current_message,
+                limit=limit
+            )
+    
+    def _get_relevant_context_intelligent(
+        self,
+        db: Session,
+        session_id: int,
+        user_id: int,
+        current_message: Optional[str] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Получение релевантного контекста через интеллектуальный отбор
+        
+        Args:
+            db: Сессия БД
+            session_id: ID текущей сессии
+            user_id: ID пользователя
+            current_message: Текущее сообщение
+            limit: Максимальное количество записей
+            
+        Returns:
+            Список релевантных контекстных записей
+        """
+        try:
+            # Получаем профиль пользователя
+            user = db.query(User).filter(User.id == user_id).first()
+            user_profile = {}
+            if user:
+                user_profile = {
+                    'name': user.name,
+                    'sun_sign': None,
+                    'moon_sign': None,
+                    'ascendant_sign': None
+                }
+                
+                # Получаем данные из натальной карты
+                natal_chart = db.query(NatalChart).filter(
+                    NatalChart.user_profile_id == user_id
+                ).order_by(NatalChart.calculated_at.desc()).first()
+                
+                if natal_chart:
+                    # Получаем знаки зодиака для Солнца и Луны
+                    planet_positions = natal_chart.planet_positions
+                    for position in planet_positions:
+                        if position.planet_name == 'sun':
+                            user_profile['sun_sign'] = position.zodiac_sign
+                        elif position.planet_name == 'moon':
+                            user_profile['moon_sign'] = position.zodiac_sign
+                    
+                    # Получаем Асцендент (куспид 1 дома)
+                    house_cuspids = natal_chart.house_cuspids
+                    for cuspid in house_cuspids:
+                        if cuspid.house_number == 1:
+                            user_profile['ascendant_sign'] = cuspid.zodiac_sign
+                            break
+            
+            # Формируем запрос на отбор контекста
+            request = ContextSelectionRequest(
+                user_id=user_id,
+                current_query=current_message or "",
+                period_days=30,
+                limit=limit,
+                include_emotions=True,
+                include_patterns=True,
+                include_karma=True,
+                user_profile=user_profile
+            )
+            
+            # Получаем интеллектуально отобранный контекст
+            result = self.context_integrator.build_context_prompt(
+                request=request,
+                db=db
+            )
+            
+            # Преобразуем SelectedEvent в формат для обратной совместимости
+            results = []
+            for event in result.relevant_history:
+                # Получаем полную запись из БД
+                entry = db.query(ContextEntry).filter(ContextEntry.id == event.id).first()
+                if entry:
+                    results.append({
+                        'id': entry.id,
+                        'user_message': entry.user_message,
+                        'ai_response': entry.ai_response,
+                        'emotional_state': entry.emotional_state,
+                        'event_description': entry.event_description,
+                        'insight_text': entry.insight_text,
+                        'tags': entry.tags,
+                        'priority': entry.priority,
+                        'created_at': entry.created_at.isoformat() if entry.created_at else None,
+                        'similarity_score': event.similarity_score,
+                        'significance_score': event.significance_score,
+                        'source': event.source,
+                        'category': event.category.value if hasattr(event.category, 'value') else str(event.category)
+                    })
+            
+            # Добавляем последние записи из текущей сессии (если их нет)
+            recent_session_entries = db.query(ContextEntry).filter(
+                and_(
+                    ContextEntry.session_id == session_id,
+                    ContextEntry.user_id == user_id
+                )
+            ).order_by(ContextEntry.created_at.desc()).limit(3).all()
+            
+            seen_ids = {r['id'] for r in results}
+            for entry in recent_session_entries:
+                if entry.id not in seen_ids:
+                    results.insert(0, {
+                        'id': entry.id,
+                        'user_message': entry.user_message,
+                        'ai_response': entry.ai_response,
+                        'emotional_state': entry.emotional_state,
+                        'event_description': entry.event_description,
+                        'insight_text': entry.insight_text,
+                        'tags': entry.tags,
+                        'priority': entry.priority,
+                        'created_at': entry.created_at.isoformat() if entry.created_at else None,
+                        'source': 'current_session'
+                    })
+                    seen_ids.add(entry.id)
+            
+            # Ограничиваем количество
+            return results[:limit]
+            
+        except Exception as e:
+            logger.error(f"Ошибка интеллектуального отбора контекста: {str(e)}", exc_info=True)
+            # Возвращаемся к старому методу при ошибке
+            return self._get_relevant_context_legacy(
+                db=db,
+                session_id=session_id,
+                user_id=user_id,
+                current_message=current_message,
+                limit=limit
+            )
+    
+    def _get_relevant_context_legacy(
+        self,
+        db: Session,
+        session_id: int,
+        user_id: int,
+        current_message: Optional[str] = None,
+        limit: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Получение релевантного контекста (старый метод)
         
         Согласно ТЗ:
         - 3 последние записи из текущей сессии

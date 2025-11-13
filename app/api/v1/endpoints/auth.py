@@ -28,7 +28,7 @@ from app.services.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["Authentication"])
+router = APIRouter(tags=["Пользователь"])
 security = HTTPBearer()
 
 

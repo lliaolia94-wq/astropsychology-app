@@ -23,7 +23,8 @@ from app.api.v1.endpoints import (
     general_router,
     users_router,
     auth_router,
-    natal_chart_router
+    natal_chart_router,
+    registers_router
 )
 try:
     from app.api.v1.endpoints import geocoding_router
@@ -38,14 +39,12 @@ except ImportError:
 load_dotenv()
 
 tags_metadata = [
-    {"name": "General", "description": "Базовые сервисные эндпоинты: корень и здоровье."},
-    {"name": "Authentication", "description": "Аутентификация пользователей: регистрация, вход, восстановление пароля."},
-    {"name": "Users", "description": "Управление пользователями и их профилями."},
-    {"name": "Astrology", "description": "Расчёты натальных карт, транзитов и календарей."},
-    {"name": "Contacts", "description": "Контакты пользователя для синастрий и упоминаний."},
-    {"name": "AI", "description": "ИИ-астролог: шаблоны и чат."},
-    {"name": "Context", "description": "Контекстные записи и извлечённые инсайты."},
-    {"name": "Guest", "description": "Гостевые расчеты без регистрации."}
+    {"name": "General", "description": "Общие сервисные эндпоинты: проверка работы API, здоровье системы."},
+    {"name": "Пользователь", "description": "Управление пользователями: регистрация, аутентификация, профиль пользователя."},
+    {"name": "Контакты", "description": "Управление контактами: создание, редактирование, список контактов пользователя."},
+    {"name": "Астрологические метрики", "description": "Астрологические расчеты: натальные карты, транзиты, календари, гостевые расчеты."},
+    {"name": "Геокодирование", "description": "Работа с геолокацией: поиск городов, определение координат, временных зон."},
+    {"name": "ИИ и контекст", "description": "ИИ-астролог и контекстная информация: чат с ИИ, контекстные записи, события, аналитика."}
 ]
 
 # FastAPI приложение
@@ -86,6 +85,7 @@ app.include_router(contacts_router)
 app.include_router(ai_router)
 app.include_router(context_router)
 app.include_router(natal_chart_router)
+app.include_router(registers_router)
 if geocoding_router:
     app.include_router(geocoding_router)
 if guest_router:

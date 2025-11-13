@@ -18,7 +18,7 @@ from app.services.geocoding_service import geocoding_service
 from app.services.natal_chart_service import natal_chart_service
 from app.api.v1.endpoints.auth import get_current_user
 
-router = APIRouter(tags=["Geocoding"], prefix="/api/geocoding")
+router = APIRouter(tags=["Геокодирование"], prefix="/api/geocoding")
 
 
 @router.post(
